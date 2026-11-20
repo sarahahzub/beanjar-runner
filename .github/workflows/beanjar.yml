@@ -15,6 +15,9 @@ on:
       mode:
         description: smoke | bench | cpu | brave | memtest
         default: smoke
+      mem_budget_min:
+        description: memtest mode, no new config run starts after this many minutes
+        default: "250"
       ipk_url:
         description: brave mode, the IPK to test
         default: https://github.com/sarahahzub/Beta-Apps/releases/download/brave-beta-v1.99.5852/com.brave.browser_1.99.5852_arm.ipk
@@ -64,10 +67,11 @@ jobs:
           BOOT_MIN: ${{ inputs.boot_min }}
           MODE: ${{ inputs.mode }}
           FWNAME: ${{ matrix.name }}
+          MEM_BUDGET_MIN: ${{ inputs.mem_budget_min }}
         run: |
           mkdir -p out && cp fw/zip.sha256 fw/headers.txt out/
           sudo docker run --rm --privileged --device /dev/kvm -v "$PWD:/w" \
-            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e FWNAME="$FWNAME" -e OUT=/w/out \
+            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e FWNAME="$FWNAME" -e MEM_BUDGET_MIN="$MEM_BUDGET_MIN" -e OUT=/w/out \
             debian:trixie bash /w/run.sh
           echo "---- results"; cat out/results.txt
       - name: Readable outputs

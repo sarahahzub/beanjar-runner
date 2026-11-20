@@ -216,7 +216,7 @@ EOF
 	idle=""; bbc_m=""; tabs=""; vid=""; yt=""; vd=""; ytv=""; bbc=""; r1=""; r2=""; r3=""; tb=""
 }
 
-ORDER1="A B C D E F"; ORDER2="F E D C B A"
+ORDER1="A F C D B E"; ORDER2="E B D C F A"
 for R in 1 2 3; do
 	[ $R = 2 ] && O=$ORDER2 || O=$ORDER1
 	for C in $O; do
