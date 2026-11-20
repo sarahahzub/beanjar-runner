@@ -1,0 +1,133 @@
+# Sourced by run.sh (MODE=extkb) once the TV has booted (helpers res, step, el, gsh, gsh_in, shot, fg, press, SSH_ROOT
+# come from run.sh). Does LG's on-screen keyboard open for a text field in an extension popup?
+#   control: a textarea in a normal tab, pointer click (the keyboard should open: shows the check can see it)
+#   pointer: the test extension's popup (extkb/), pointer click on its textarea
+#   ok:      the same popup, DevTools puts focus on the textarea, then the remote's OK
+# After each, the remote's OK once more: with the keyboard up that types its focused key into the field, which the
+# field's own event log (window.LOG) shows. Screenshots in shots/extkb-*.png; logs/extkb/.
+LS=luna://com.webos.applicationManager
+ID=$(ar p /w/brave.ipk data.tar.gz | tar tzf - | sed -n 's#^\(\./\)\{0,1\}usr/palm/applications/\([^/]*\)/appinfo.json$#\2#p' | head -1)
+T=/tmp/$ID
+B=$OUT/logs/extkb; mkdir -p "$B"
+EXTDIR=/media/developer/temp/extkb
+EID=$(python3 -c "import hashlib,sys;print(''.join(chr(97+int(c,16)) for c in hashlib.sha256(sys.argv[1].encode()).hexdigest()[:32]))" "$EXTDIR")
+res app_id "$ID"; res ext_id "$EID"
+gsh true >/dev/null
+procs() { gsh "for p in /proc/[0-9]*; do tr '\\0' ' ' < \$p/cmdline 2>/dev/null | grep -q '[$(echo ${ID:0:1})]${ID:1}/browser/chrome' && echo \${p#/proc/}; done" | grep -E '^[0-9]+$' | tr '\n' ' '; }
+launch() { gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\"}'"; }
+close() { gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'"; }
+ce() { timeout 60 python3 /w/extcdp.py eval "$1" "$2" 2>&1 | tail -1; }
+targets() { timeout 30 python3 /w/extcdp.py targets 2>&1 | tail -1; }
+snap() { timeout 60 beanjar screenshot tv1 "$OUT/shots/extkb-$1.png" >>"$OUT/logs/screenshot.log" 2>&1; echo "$OUT/shots/extkb-$1.png"; }
+rd() { python3 /w/regdiff.py "$@" 2>&1 | tail -1; }
+ML=0
+mark() { ML=$(gsh "wc -l < /var/log/messages" | tail -1 | tr -dc 0-9); }
+msgs() { gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -i -E 'ime|keyboard|vkb|maliit|NL_VSC' | grep -v -E 'NL_SSG|HOMEHUB' | tail -12" > "$B/msgs-$1.txt"
+	tr '\n' ' ' < "$B/msgs-$1.txt" | cut -c1-500; }
+blog() { gsh "tail -n 60 $T/browser.log 2>/dev/null | grep -v -E 'dbus|LD_PRELOAD|create_wl_buffer'" > "$B/browser-$1.txt"; }
+ybox() { # box of the popup's yellow background in a screenshot
+	python3 - "$1" <<'EOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size; px = im.load()
+xs = [x for x in range(0, w, 2) for y in range(0, h, 2) if abs(px[x, y][0] - 255) < 30 and abs(px[x, y][1] - 212) < 30 and px[x, y][2] < 60]
+ys = [y for x in range(0, w, 2) for y in range(0, h, 2) if abs(px[x, y][0] - 255) < 30 and abs(px[x, y][1] - 212) < 30 and px[x, y][2] < 60]
+print("%d %d %d %d" % (min(xs), min(ys), max(xs), max(ys)) if len(xs) > 200 else "none")
+EOF
+}
+
+step extkb-prep
+(timeout 6000 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15
+timeout 90 beanjar screensaver stop tv1 --json > "$OUT/logs/screensaver-stop.json" 2>&1; res screensaver_stop_rc $?
+press HOME; sleep 8
+
+step extkb-install
+npm install -g --silent @webos-tools/cli >"$OUT/logs/npm.log" 2>&1
+t=$(date +%s); timeout 900 beanjar ares-install -d tv1 /w/brave.ipk > "$B/ares-install.txt" 2>&1
+res install "rc=$? s=$(( $(date +%s) - t )) $(tail -1 "$B/ares-install.txt" | cut -c1-150)"
+APPDIR=$(gsh "for d in /media/developer/apps/usr/palm/applications/$ID /media/cryptofs/apps/usr/palm/applications/$ID; do [ -f \$d/appinfo.json ] && echo \$d; done" | grep ^/ | head -1)
+res appdir "${APPDIR:-not installed}"
+[ -n "$APPDIR" ] || { res extkb_result "install failed"; return 0; }
+res version "$(gsh "grep -o '\"version\": *\"[^\"]*\"' $APPDIR/appinfo.json" | tail -1)"
+
+step extkb-launch1
+t=$(date +%s); launch > "$B/launch1.txt"
+while [ -z "$(procs)" ] && [ $(( $(date +%s) - t )) -lt 240 ]; do sleep 10; done; sleep 45
+TVT=$(gsh "for p in /proc/[0-9]*; do tr '\\0' '\\n' < \$p/cmdline 2>/dev/null | grep -m1 '^--load-extension=' ; done" | grep -m1 '^--load-extension=' | sed 's/^--load-extension=//')
+res tvtools_path "${TVT:-not found}"
+close >/dev/null; t=$(date +%s); while [ -n "$(procs)" ] && [ $(( $(date +%s) - t )) -lt 40 ]; do sleep 3; done
+p=$(procs); [ -n "$p" ] && gsh "kill -9 $p" >/dev/null
+
+step extkb-extension
+tar -C /w/extkb -cf - . | gsh_in "exec cat > /tmp/extkb.tar" >/dev/null
+gsh "rm -rf $EXTDIR && mkdir -p $EXTDIR && tar -xf /tmp/extkb.tar -C $EXTDIR && chmod -R a+rX /media/developer/temp && ls -l $EXTDIR" > "$B/extdir.txt"
+P=$(gsh "find $APPDIR/data /media/developer/$ID -path '*profile/Default/Preferences' 2>/dev/null | head -1" | grep ^/ | head -1)
+res prefs "${P:-none}"
+gsh "sed 's/\"pinned_extensions\":\[\([^]]*\)\]/\"pinned_extensions\":[\1,\"$EID\"]/' '$P' > /tmp/prefs.new && cat /tmp/prefs.new > '$P' && grep -o '\"pinned_extensions\":\[[^]]*\]' '$P'" > "$B/pin.txt"
+res pinned "$(tail -1 "$B/pin.txt")"
+gsh "printf '%s\n' --remote-debugging-port=9222 '--load-extension=$TVT,$EXTDIR' > $T/browser.flags && chmod 644 $T/browser.flags && cat $T/browser.flags" > "$B/flags.txt"
+res flags "$(tr '\n' ' ' < "$B/flags.txt")"
+
+step extkb-launch2
+t=$(date +%s); launch > "$B/launch2.txt"
+(${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L 9222:127.0.0.1:9222 } > "$B/ssh-L.log" 2>&1 &)
+ok=""; while [ $(( $(date +%s) - t )) -lt 300 ]; do sleep 8; targets | grep -q '"page"' && { ok=1; break; }; done
+res cdp_ready_s "$(( $(date +%s) - t )) ok=${ok:-no}"
+sleep 30; targets > "$B/targets-start.json"
+res ext_loaded "$(grep -c "chrome-extension://$EID" "$B/targets-start.json")"
+BASE=$(snap base)
+
+step extkb-control
+mark
+ce "chrome://newtab" "location.href='data:text/html,<body style=margin:0><textarea id=t style=\"width:900px;height:300px;font-size:30px;margin:40px\"></textarea>'" >/dev/null
+sleep 8; C0=$(snap control-0)
+timeout 30 beanjar remote click tv1 400 300 >>"$OUT/logs/remote.log" 2>&1; sleep 6
+C1=$(snap control-1)
+res control_kb "$(rd "$C0" "$C1") msgs=[$(msgs control)]"
+press ENTER; sleep 4; snap control-2 >/dev/null
+res control_typed "$(ce "data:" "document.getElementById('t').value")"
+press BACK; sleep 3; press BACK; sleep 3
+blog control
+
+open_popup() { # $1 name
+	local r; r=$(ce "chrome-extension://$EID/bg.js" "chrome.action.openPopup().then(()=>'ok',e=>'err '+e.message)")
+	sleep 6; local s; s=$(snap "$1-open")
+	res "$1_openpopup" "$r targets=$(targets | grep -o "chrome-extension://$EID/popup.html" | head -1) box=$(ybox "$s")"
+	echo "$s"; }
+
+step extkb-pointer
+mark
+S=$(open_popup pointer | tail -1)
+BOX=$(ybox "$S")
+if [ "$BOX" != none ]; then
+	set -- $BOX; cx=$(( ($1 + $3) / 2 )); cy=$(( ($2 + $4) / 2 + 10 ))
+	timeout 30 beanjar remote click tv1 $cx $cy >>"$OUT/logs/remote.log" 2>&1; sleep 6
+	P1=$(snap pointer-1)
+	res pointer_kb "click=$cx,$cy $(rd "$S" "$P1") msgs=[$(msgs pointer)]"
+	res pointer_log "$(ce "popup.html" "JSON.stringify({ae:(document.activeElement||{}).id, log:window.LOG})")"
+	press ENTER; sleep 4; snap pointer-2 >/dev/null
+	res pointer_typed "$(ce "popup.html" "JSON.stringify({v:document.getElementById('user').value, log:window.LOG.slice(-4)})")"
+else
+	res pointer_kb "no popup on screen"
+fi
+blog pointer
+press BACK; sleep 3; ce "popup.html" "window.close()" >/dev/null; sleep 3
+
+step extkb-ok
+mark
+S=$(open_popup ok | tail -1)
+res ok_focus "$(ce "popup.html" "(function(){var u=document.getElementById('user');u.focus();return (document.activeElement||{}).id})()")"
+sleep 4; K0=$(snap ok-0)
+res ok_after_focus "$(rd "$S" "$K0")"
+press ENTER; sleep 6
+K1=$(snap ok-1)
+res ok_kb "$(rd "$K0" "$K1") msgs=[$(msgs ok)]"
+res ok_log "$(ce "popup.html" "JSON.stringify({ae:(document.activeElement||{}).id, log:window.LOG})")"
+press ENTER; sleep 4; snap ok-2 >/dev/null
+res ok_typed "$(ce "popup.html" "JSON.stringify({v:document.getElementById('user').value, log:window.LOG.slice(-4)})")"
+blog ok
+press BACK; sleep 3
+
+res extkb_result "done"
+close >/dev/null; sleep 5
+pkill -f 'ssh .*-L 9222' 2>/dev/null

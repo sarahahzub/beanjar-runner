@@ -13,7 +13,7 @@ on:
         description: minutes to wait for the TV UI
         default: "25"
       mode:
-        description: smoke | bench | cpu | brave | dpad
+        description: smoke | bench | cpu | brave | dpad | extkb
         default: smoke
       ipk_url:
         description: brave mode, the IPK to test
@@ -23,7 +23,7 @@ on:
         default: 2eb22f3139b06f14903e3804caccaf24ca1611551b9551dcbf5c299e0fb357e2
 
 permissions:
-  contents: read
+  contents: write   # extkb: read draft release assets (test builds) of this repo
 
 jobs:
   tv:
@@ -33,7 +33,7 @@ jobs:
         include: ${{ fromJSON(inputs.jobs) }}
     name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.mode == 'dpad' && 240 || inputs.mode == 'brave' && 110 || 75 }}
+    timeout-minutes: ${{ inputs.mode == 'dpad' && 240 || inputs.mode == 'extkb' && 100 || inputs.mode == 'brave' && 110 || 75 }}
     steps:
       - uses: actions/checkout@v4
       - name: Host facts
@@ -41,12 +41,18 @@ jobs:
           nproc; free -m | head -2; ls -l /dev/kvm /dev/dri 2>&1 | head -5
           df -h / | tail -1
       - name: Download and check the IPK (brave and dpad modes)
-        if: inputs.mode == 'brave' || inputs.mode == 'dpad'
+        if: inputs.mode == 'brave' || inputs.mode == 'dpad' || inputs.mode == 'extkb'
         env:
           IPK_URL: ${{ matrix.ipk_url || inputs.ipk_url }}
           IPK_SHA: ${{ matrix.ipk_sha256 || inputs.ipk_sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -sS -L --retry 3 -o brave.ipk "$IPK_URL"
+          # a release asset of this repo by API URL (a draft test build): download with the job's token
+          case "$IPK_URL" in
+          https://api.github.com/repos/${{ github.repository }}/releases/assets/*)
+            curl -sS -L --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" -o brave.ipk "$IPK_URL" ;;
+          *) curl -sS -L --retry 3 -o brave.ipk "$IPK_URL" ;;
+          esac
           ls -l brave.ipk
           echo "$IPK_SHA  brave.ipk" | sha256sum -c -
       - name: Test clip for the D-pad page (dpad mode, MDN CC0 sample)
