@@ -26,14 +26,21 @@ msgs() { gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -i -E 'i
 	tr '\n' ' ' < "$B/msgs-$1.txt" | cut -c1-500; }
 blog() { gsh "tail -n 60 $T/browser.log 2>/dev/null | grep -v -E 'dbus|LD_PRELOAD|create_wl_buffer'" > "$B/browser-$1.txt"; }
 lit() { python3 -c "import sys;from PIL import Image,ImageStat;print(int(ImageStat.Stat(Image.open(sys.argv[1]).convert('L')).mean[0]))" "$1" 2>/dev/null || echo 0; }
-ready() { # $1 name: the browser in front and drawn (not a black frame) before a test; relaunch if needed
-	local i a s l
-	for i in 1 2 3 4 5 6 7 8; do
+ready() { # $1 name: the browser in front and drawn (not a black frame) before a test. LG's first-use overlay
+	# (com.webos.app.firstuse-overlay) starts about 5 min after a fresh firmware boots and puts Home in front; a plain
+	# launch then does not bring the browser back, so close the overlay and restart the browser.
+	local i a s l t p
+	for i in 1 2 3 4; do
+		gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"com.webos.app.firstuse-overlay\"}'" >/dev/null
 		a=$(fg | tail -1); s=$(snap "$1-ready"); l=$(lit "$s")
 		[ "$a" = "$ID" ] && [ "$l" -gt 40 ] && { res "$1_ready" "try=$i fg=$a lit=$l"; return 0; }
 		timeout 60 beanjar screensaver stop tv1 >/dev/null 2>&1
-		[ "$a" = "$ID" ] || launch >/dev/null
-		sleep 12
+		close >/dev/null; t=$(date +%s); while [ -n "$(procs)" ] && [ $(( $(date +%s) - t )) -lt 30 ]; do sleep 3; done
+		p=$(procs); [ -n "$p" ] && gsh "kill -9 $p" >/dev/null
+		pgrep -f 'ssh .*-L 9222' >/dev/null || (${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L 9222:127.0.0.1:9222 } >> "$B/ssh-L.log" 2>&1 &)
+		launch >/dev/null; t=$(date +%s)
+		while [ $(( $(date +%s) - t )) -lt 150 ]; do sleep 8; targets | grep -q '"page"' && break; done
+		sleep 20
 	done
 	res "$1_ready" "NOT ready: fg=$a lit=$l"; return 1; }
 ybox() { # box of the popup's yellow background in a screenshot
@@ -116,7 +123,6 @@ open_popup() { # $1 name: click the icon, then up to 40 s for the popup to be dr
 	echo "$s"; }
 
 step extkb-pointer
-ce "data:" "history.back()" >/dev/null; sleep 8
 ready pointer
 mark
 S=$(open_popup pointer | tail -1)
