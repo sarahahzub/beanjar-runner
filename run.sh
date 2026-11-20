@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs inside a privileged debian:trixie container with /dev/kvm. Inputs (env):
 #   FW_ZIP   path of LG's firmware ZIP (downloaded by the workflow at run time, never committed)
-#   KERNEL   x86-64 | default   (default: Beanjar's arm64 guest kernel, TCG on an x86_64 host)
+#   KERNEL   x86-64 | arm64 | auto   (arm64 on an x86_64 host = full TCG; auto = Beanjar's own pick)
 #   BOOT_MIN minutes to wait for the TV UI (default 25)
 #   OUT      output directory (screenshots, logs, results.txt)
 set -u
@@ -17,7 +17,7 @@ step() { echo "== $* (t=$(el)s)"; }
 step packages
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends wget ca-certificates git build-essential cmake liblzo2-dev \
-	libssl-dev zlib1g-dev unzip python3 python3-pil procps nodejs npm >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
+	libssl-dev zlib1g-dev unzip python3 python3-pil procps nodejs npm openssh-client >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
 arch=$(dpkg --print-architecture)
 url=https://github.com/webosbrew/beanjar/releases/download/v$V
 mkdir -p /tmp/debs && cd /tmp/debs
@@ -47,19 +47,22 @@ res host_render_node "$(ls /dev/dri/renderD* 2>/dev/null | head -1 || echo none)
 
 step create
 t=$(date +%s)
-beanjar create tv1 --firmware "$EPK" --mode direct --layers normal,gl,devmode >"$OUT/logs/create.log" 2>&1
+beanjar create tv1 --firmware "$EPK" --mode direct --layers normal,gl,devmode,rootssh >"$OUT/logs/create.log" 2>&1
 rc=$?; tail -15 "$OUT/logs/create.log"
 res create_rc $rc; res create_s $(( $(date +%s) - t ))
 if [ $rc != 0 ]; then res result "create refused/failed: $(grep -v '^\s*$' "$OUT/logs/create.log" | tail -2 | tr '\n' ' ' | cut -c1-300)"; exit 0; fi
 rm -f "$EPK"
 beanjar info tv1 --json > "$OUT/logs/info-created.json" 2>&1
 res platform "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("platform") or d.get("target") or "?")' "$OUT/logs/info-created.json" 2>/dev/null)"
-if [ "$KERNEL" = x86-64 ]; then beanjar settings tv1 set guest_kernel=x86-64 2>&1 | tail -3; fi
+if [ "$KERNEL" != auto ]; then beanjar settings tv1 set guest_kernel=$KERNEL 2>&1 | tail -3; fi
 beanjar settings tv1 > "$OUT/logs/settings.txt" 2>&1
 VMDIR=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' "$OUT/logs/info-created.json")
 
 # --- helpers ---
-gsh() { timeout 60 beanjar shell tv1 -- sh -c "$1" 2>&1; }
+SSH_ROOT=""
+gsh() { [ -n "$SSH_ROOT" ] || SSH_ROOT=$(beanjar info tv1 --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin).get("ssh",{}).get("root",""))' 2>/dev/null)
+	[ -n "$SSH_ROOT" ] || { echo "no root ssh"; return 1; }
+	timeout 60 ${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ConnectTimeout=10 } "$1" 2>&1 </dev/null; }
 qmp() { # QMP command JSON lines from argv, prints replies
 	python3 - "$VMDIR/run/qmp.sock" "$@" <<'EOF'
 import json, socket, sys
@@ -82,7 +85,7 @@ shot() { # shot NAME : beanjar screenshot, else QMP screendump
 }
 fg() { gsh "luna-send -n 1 -f luna://com.webos.applicationManager/getForegroundAppInfo '{}' 2>/dev/null | grep -o '\"appId\": *\"[^\"]*\"' | cut -d'\"' -f4"; }
 press() { timeout 30 beanjar remote press tv1 "$@" >>"$OUT/logs/remote.log" 2>&1 || echo "remote press $* failed (rc $?)" | tee -a "$OUT/logs/remote.log"; }
-vmstat_line() { ps -C qemu-system-x86_64,qemu-system-aarch64 -o %cpu=,rss= 2>/dev/null | awk '{c+=$1; r+=$2} END {printf "qemu_cpu=%s%% qemu_rss_mb=%d", c, r/1024}'; }
+vmstat_line() { ps -o %cpu=,rss= -p "$(pgrep -d, -f 'qemu-system-' || echo 1)" 2>/dev/null | awk '{c+=$1; r+=$2} END {printf "qemu_cpu=%s%% qemu_rss_mb=%d", c, r/1024}'; }
 
 step start
 t=$(date +%s)
@@ -97,7 +100,7 @@ TS=$(date +%s); booted=""; last_shot=0; n=0
 while [ $(( $(date +%s) - TS )) -lt $(( BOOT_MIN * 60 )) ]; do
 	sleep 20; n=$((n+1))
 	a=$(fg | tail -1)
-	echo "t=$(( $(date +%s) - TS ))s fg=[$a] $(vmstat_line) $(beanjar list 2>/dev/null | awk 'NR==2{print $2}')"
+	echo "t=$(( $(date +%s) - TS ))s fg=[$a] $(vmstat_line) guest[$(gsh 'echo up=$(cut -d" " -f1 /proc/uptime) procs=$(ls -d /proc/[0-9]* | wc -l) $(systemctl is-system-running 2>/dev/null)' | tail -1 | cut -c1-120)]"
 	if [ $(( $(date +%s) - last_shot )) -ge 120 ]; then shot boot >/dev/null; last_shot=$(date +%s); fi
 	case "$a" in com.*|org.*|*.app.*) booted="$a"; break;; esac
 	if ! pgrep -f qemu-system >/dev/null; then echo "QEMU is gone"; break; fi
@@ -143,4 +146,5 @@ beanjar vnc stop tv1 >/dev/null 2>&1
 timeout 120 beanjar stop tv1 --force >"$OUT/logs/stop.log" 2>&1 || timeout 60 beanjar stop tv1 --force --unplug >>"$OUT/logs/stop.log" 2>&1
 cp -r "$VMDIR/logs" "$OUT/logs/vm" 2>/dev/null
 res result "${booted:+booted}${booted:-no UI within ${BOOT_MIN} min}"
+chmod -R a+rwX "$OUT" 2>/dev/null
 exit 0

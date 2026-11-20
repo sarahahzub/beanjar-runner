@@ -50,6 +50,9 @@ jobs:
             -e FW_ZIP=/w/fw/fw.zip -e KERNEL -e BOOT_MIN -e OUT=/w/out \
             debian:trixie bash /w/run.sh
           echo "---- results"; cat out/results.txt
+      - name: Readable outputs
+        if: always()
+        run: sudo chmod -R a+rwX out || true
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
