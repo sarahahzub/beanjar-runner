@@ -17,7 +17,7 @@ toolbar; obs bar_toolbar "$LASTFX"
 k DOWN; obs bar_down1 "$(ringrow) $LASTFX"
 k DOWN; obs bar_down2 "$(ringrow) $LASTFX"
 k UP; obs bar_up "$(ringrow) $LASTFX"
-k DOWN; k ENTER; sleep 3; obs bar_after_ok "$(gsh "grep -o '\"chromium_native\":{[^}]*}' $APPDIR/data/profile/'Local State' $T/profile/'Local State' 2>/dev/null" | tr '\n' ' ')"
+k DOWN; k DOWN; k ENTER; sleep 3; obs bar_after_ok "$(gsh "grep -o '\"chromium_native\":{[^}]*}' $APPDIR/data/profile/'Local State' $T/profile/'Local State' 2>/dev/null" | tr '\n' ' ')"
 fresh; base; snap "$OUT/shots/bar-next-start.png"; obs bar_next_start "$(gsh "grep -o '\"chromium_native\":{[^}]*}' $APPDIR/data/profile/'Local State' 2>/dev/null")"
 
 # ---------- 1. Back
@@ -26,8 +26,9 @@ fresh; nav $W/a.html; base; pf
 cf toB >/dev/null; FG=1 k ENTER; sleep 5; obs back_on_B "$(url)"
 FG=1 k BACK; sleep 3; obs back_after_back "$(url) row=$(ringrow)"
 fresh; base
-KW=1 k BACK; snap "$OUT/shots/back-toast-1s.png"; obs back_first "fg=$(fg | tail -1) procs=[$(procs)]"
-KW=1 k BACK; sleep 8; obs back_second "fg=$(fg | tail -1) procs=[$(procs)]"; snap "$OUT/shots/back-after-second.png"
+press BACK; sleep 1; snap "$OUT/shots/back-toast-1s.png"; obs back_first "fg=$(fg | tail -1) procs=[$(procs)]"
+sleep 4; press BACK; sleep 1; snap "$OUT/shots/back-toast-again.png"; press BACK; sleep 10
+obs back_second "fg=$(fg | tail -1) procs=[$(procs)]"; snap "$OUT/shots/back-after-second.png"
 mlog back; obs back_media "$(grep -E 'quitting|toast|SIGTERM|SIGKILL|chrome exited' "$B/media-back.log" | tail -4 | tr '\n' ';')"
 
 # ---------- 2. App menu: default and the A/B switches (5856 only)
@@ -77,7 +78,7 @@ k BACK; sleep 2
 # ---------- 5. Permission prompt (geolocation)
 st geo "permission prompt: CDP focus bGeo, OK, then DOWN / RIGHT / LEFT / OK"
 fresh; nav $W/t.html 6; base; pf; cf bGeo >/dev/null; k ENTER; sleep 5; G0=$(last)
-for kk in DOWN RIGHT LEFT; do p=$(last); k $kk; obs geo_$N "$kk diff_prev=$(dif "$p" "$(last)") ui=$LASTFX"; done
+for kk in DOWN RIGHT RIGHT LEFT; do p=$(last); k $kk; obs geo_$N "$kk diff_prev=$(dif "$p" "$(last)") ui=$LASTFX"; done
 k ENTER; sleep 3; obs geo_after_ok "$(logv) perm=$(cdp eval "navigator.permissions.query({name:'geolocation'}).then(p=>p.state)")"
 
 # ---------- 6. History: UP from the entries
@@ -88,14 +89,14 @@ nav $SCH://history 6; base; k DOWN DOWN; k BACK; sleep 3; obs hist_back "$(url)"
 
 # ---------- 7. Brave New Tab page
 st ntp "New Tab page: DOWN x2 (top site), focus ring?, UP x4 (toolbar?)"
-fresh; base; kn 2 DOWN; obs ntp_down "$(ringrow) $LASTFX ae=$(timeout 25 python3 /w/cdp.py ae 2>&1 | tail -1 | cut -c1-160)"
+fresh; base; k DOWN; obs ntp_down1 "$(timeout 25 python3 /w/cdp.py ae 2>&1 | tail -1 | cut -c1-160)"; k DOWN; obs ntp_down "$(ringrow) $LASTFX ae=$(timeout 25 python3 /w/cdp.py ae 2>&1 | tail -1 | cut -c1-160)"
 for i in 1 2 3 4; do k UP; obs ntp_up$i "$(ringrow) $LASTFX"; done
 
 # ---------- 8. Shields panel
 st shields "Shields: open from the toolbar, DOWN x6 with the panel's focused element, BACK"
-fresh; nav $W/a.html; base; pf; toolbar; goto "1040<x<1080 and y0>=38" LEFT 16; obs shields_reached "$LASTFX"
+fresh; nav $W/a.html; base; pf; toolbar; goto "x>1235 and y0>=38" LEFT 4; kn 4 LEFT; obs shields_reached "$LASTFX"
 k ENTER; sleep 5; obs shields_panel "$(cdp pages | cut -c1-300)"
-for i in 1 2 3 4 5 6; do k DOWN; obs shields_down$i "$(CDP_MATCH=shields timeout 25 python3 /w/cdp.py eval "(function(){let e=document.activeElement;while(e&&e.shadowRoot&&e.shadowRoot.activeElement)e=e.shadowRoot.activeElement;return e?(e.tagName+'#'+e.id+' '+(e.getAttribute('aria-label')||e.textContent||'').trim().slice(0,40)):'none'})()" 2>&1 | tail -1)"; done
+for i in 1 2 3 4 5 6; do k DOWN; snap "$OUT/shots/shields-d$i.png"; obs shields_down$i "$(CDP_MATCH=shields timeout 25 python3 /w/cdp.py eval "(function(){let e=document.activeElement;while(e&&e.shadowRoot&&e.shadowRoot.activeElement)e=e.shadowRoot.activeElement;return e?(e.tagName+'#'+e.id+' '+(e.getAttribute('aria-label')||e.textContent||'').trim().slice(0,40)):'none'})()" 2>&1 | tail -1)"; done
 k BACK; sleep 2; obs shields_after_back "$(cdp pages | cut -c1-200)"
 
 res dpad_result "done"
