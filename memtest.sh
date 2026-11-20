@@ -133,7 +133,7 @@ pss_of() { sed -n 's/.*n=\([0-9]*\) pss=\([0-9]*\) swappss=\([0-9]*\).*memavail=
 echo "fw cfg round launch_s idle_pss idle_swap bbc_pss bbc_swap tabs_pss tabs_swap video_pss video_swap yt_pss yt_swap memavail_min swapfree_min oom_lines renderer_crash tabs1_unresp/disc tabs2_unresp/disc brave_alive guest_hung bbc_load_ms bbc_blocked bbc2_load_ms bbc2_blocked google_ms wiki_ms guardian_ms video yt" | tr ' ' '\t' > "$OUT/mem.tsv"
 
 runcfg() {
-	local C=$1 R=$2 tag="$1-r$2" t0="" n0="" ls="" j="" s="" idle="" bbc="" bbc_m="" tabs="" vid="" yt="" l="" r1="" r2="" r3="" r4="" tb="" tb1="" vd="" ytv="" mins="" oom="" crash="" alive_b="" hung=N
+	local C=$1 RND=$2 tag="$1-r$2" t0="" n0="" ls="" j="" s="" idle="" bbc="" bbc_m="" tabs="" vid="" yt="" l="" r1="" r2="" r3="" r4="" tb="" tb1="" vd="" ytv="" mins="" oom="" crash="" alive_b="" hung=N
 	step "mem $tag"
 	t0=$(date +%s)
 	alive || recover "before $tag"
@@ -212,7 +212,7 @@ EOF
 	local vsum ysum
 	vsum=$(sed -n 's/.*"video": *{\([^}]*\)}.*/\1/p' <<<"$vd" | tr -d ' "' | tr ',' ';' | cut -c1-120)
 	ysum=$(sed -n 's/.*"video": *{\([^}]*\)}.*/\1/p' <<<"$ytv" | tr -d ' "' | tr ',' ';' | cut -c1-120)
-	row "${FWNAME:-fw}" "$C" "$R" "$l" "$ip" "$is" "$bp" "$bs" "$tp" "$tsw" "$vp" "$vs" "$yp" "$ys" "$ma" "$sf" "$oom" "$crash" \
+	row "${FWNAME:-fw}" "$C" "$RND" "$l" "$ip" "$is" "$bp" "$bs" "$tp" "$tsw" "$vp" "$vs" "$yp" "$ys" "$ma" "$sf" "$oom" "$crash" \
 		"$(field "$tb1" unresponsive)/$(field "$tb1" discarded)" "$(field "$tb" unresponsive)/$(field "$tb" discarded)" "$alive_b" "$hung" "$(field "$bbc" loadEventEnd_ms)" "$(field "$bbc" blocked_by_client)" \
 		"$(field "$r4" loadEventEnd_ms)" "$(field "$r4" blocked_by_client)" \
 		"$(field "$r1" loadEventEnd_ms)" "$(field "$r2" loadEventEnd_ms)" "$(field "$r3" loadEventEnd_ms)" "${vsum:-none}" "${ysum:-none}"
