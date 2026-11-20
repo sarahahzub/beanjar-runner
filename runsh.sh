@@ -57,6 +57,35 @@ res appdir "${APPDIR:-not installed}"
 res app_version "$(gsh "grep version $APPDIR/appinfo.json" | tr -d '\n ')"
 res runsh_sha "$(gsh "sha256sum $APPDIR/bin/run.sh" | cut -c1-64)"
 
+if [ -f /w/run.sh.fix ]; then # quick lastlog check of a fixed run.sh on top of the installed package
+	step fix-install
+	timeout 60 $SSHB "exec cat > $APPDIR/bin/run.sh" < /w/run.sh.fix
+	gsh "chmod 755 $APPDIR/bin/run.sh" >/dev/null
+	res fix_sha "want=$(sha256sum /w/run.sh.fix | cut -c1-64) got=$(gsh "sha256sum $APPDIR/bin/run.sh" | cut -c1-64)"
+	step fix-launch1
+	CDP=""; launch "{\"id\":\"$ID\"}" > "$B/launch-f1.txt"; waitwin f1
+	res f1_window "s=$WIN_S procs=[$(procs)] fg=[$(fg | tail -1)]"; shot f1-window >/dev/null
+	sleep 30; lastlog f1-running
+	res f1_lastlog_running "$(grep -E '^-' "$B/lastlog-f1-running.txt" | awk '{print $5, $NF}' | tr '\n' ';')"
+	close > /dev/null; res f1_close "$(waitgone)"; sleep 10
+	lastlog f1-closed
+	res f1_lastlog_closed "$(grep -E '^-' "$B/lastlog-f1-closed.txt" | awk '{print $5, $NF}' | tr '\n' ';')"
+	res f1_mem_tail "$(grep -A6 'lastlog/mem.txt' "$B/lastlog-f1-closed.txt" | tail -3 | tr '\n' ' ' | cut -c1-300)"
+	res f1_helpers_left "$(gsh "ps -ef 2>/dev/null | grep -c '[r]un.sh'")"
+	step fix-launch2-segv
+	launch "{\"id\":\"$ID\"}" > "$B/launch-f2.txt"; waitwin f2
+	res f2_window "s=$WIN_S procs=[$(procs)]"
+	lastlog f2-running
+	res f2_lastlog_prev "$(sed -n '/lastlog.prev$/,$p' "$B/lastlog-f2-running.txt" | grep -E '^-' | awk '{print $5, $NF}' | tr '\n' ';')"
+	P=$(mainpid); gsh "kill -SEGV $P" >/dev/null; res f2_segv "pid=$P $(waitgone)"
+	sleep 30; lastlog f2-segv
+	res f2_lastlog_segv "$(grep -E '^-' "$B/lastlog-f2-segv.txt" | awk '{print $5, $7, $8, $NF}' | tr '\n' ';')"
+	res f2_media_tail "$(grep -A6 'lastlog/media.log' "$B/lastlog-f2-segv.txt" | tail -2 | tr '\n' ' ' | cut -c1-300)"
+	res f2_mem_tail "$(grep -A6 'lastlog/mem.txt' "$B/lastlog-f2-segv.txt" | tail -2 | tr '\n' ' ' | cut -c1-300)"
+	res runsh_result "fix done"
+	return 0
+fi
+
 step a-launch-plain
 CDP=""
 t0=$(now); launch "{\"id\":\"$ID\"}" > "$B/launch-a.txt"

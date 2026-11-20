@@ -1,0 +1,345 @@
+#!/bin/sh
+# bin/run.sh: starts the browser. bin/run (the launcher, package/launcher/cnrun.c) runs it inside webOS's Developer Mode
+# jail as the app's own user: no root, /tmp is RAM, the app folder is writable flash. It must exec the browser, because
+# LSM only shows windows from the launched app's process tree. busybox sh only.
+D=$(cd "$(dirname "$0")/.." && pwd)
+ID=$(basename "$D")
+T=/tmp/$ID
+mkdir -p "$T/tmp"
+chmod 700 "$T"
+# Storage: profile (bookmarks, logins, extensions) and the 32 MB disk cache go on flash. The app folder itself is
+# root's, but the package ships $D/data writable (mkipk.py); older installs may have the profile in
+# /media/developer/$ID (writable on some webOS versions only). So: the folder that already has a profile, else $D/data,
+# else /media/developer/$ID, else /tmp (RAM, wiped at reboot). Logs, shared memory ($TMPDIR, used with
+# --disable-dev-shm-usage) and option files always stay in /tmp.
+S=
+w() { mkdir -p "$1/profile" "$1/cache" 2>/dev/null && touch "$1/profile/.w" 2>/dev/null && rm -f "$1/profile/.w"; }
+for c in "$D/data" "/media/developer/$ID"; do
+	[ -d "$c/profile/Default" ] && w "$c" && { S=$c; break; }
+done
+[ -n "$S" ] || for c in "$D/data" "/media/developer/$ID"; do w "$c" && { S=$c; break; }; done
+[ -n "$S" ] || S=$T
+mkdir -p "$S/profile" "$S/cache"
+# one-time move of a profile made by older versions in /tmp
+[ "$S" != "$T" ] && [ -d "$T/profile/Default" ] && [ ! -d "$S/profile/Default" ] && cp -a "$T/profile/." "$S/profile/" && rm -rf "$T/profile"
+# after the move: cp -a copies the RAM profile's own mode (755) onto the folder
+chmod 700 "$S/profile" "$S/cache" 2>/dev/null
+# Native apps get neither XDG_RUNTIME_DIR nor EGL_PLATFORM from SAM (webos-native-app-kit WEBOS-PLATFORM.md).
+export XDG_RUNTIME_DIR=/tmp/xdg EGL_PLATFORM=wayland
+export HOME=$S TMPDIR=$T/tmp XDG_CACHE_HOME=$S/cache XDG_CONFIG_HOME=$S
+export LANG=${LANG:-en_US.UTF-8}
+# No Google API keys in a Chromium build: "no" hides the "Google API keys are missing" bar (Chromium's documented
+# opt-out). Sync stays unavailable either way.
+export GOOGLE_API_KEY=no GOOGLE_DEFAULT_CLIENT_ID=no GOOGLE_DEFAULT_CLIENT_SECRET=no
+# Chrome's --class becomes the Wayland app id; patch 0011 sends it as the webOS "appId" window property (LSM only
+# shows windows with the launched app's id).
+APPID_FLAGS="--class=$ID"
+B=$D/browser
+# Extra flags, one per line, '#' comments: $D/browser.flags (shipped) and $T/browser.flags (for troubleshooting).
+# Each line is one argument, spaces included (e.g. --js-flags=--max-old-space-size=128 --optimize-for-size): the exec
+# below splits $EXTRA on newlines only and without globbing.
+EXTRA=$(cat "$D/browser.flags" "$T/browser.flags" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; /^#/d; /^$/d')
+rm -f "$S/profile/Singleton"*
+# No core dumps: the TV writes them into the working directory, and a few hundred MB fill the small app partition so
+# that the next install fails. Crash reports still go to $T.
+ulimit -c 0
+cd "$T"
+# after a kill: no "restore pages?" bubble
+P=$S/profile/Default/Preferences
+[ -f "$P" ] && sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/; s/"exited_cleanly":false/"exited_cleanly":true/' "$P"
+# Start page: Chrome's own New Tab page. The bookmarks bar is on: a new profile starts with that preference, an
+# existing profile gets it once if it never had a bookmark_bar setting.
+mkdir -p "$S/profile/Default"
+# TV Tools (ext/tvtools, id fixed by the "key" in its manifest) is pinned to the toolbar once, so the remote reaches
+# it without the puzzle menu; if the user unpins it later, that choice stays.
+TVT=ikkplgnegbekkbamfelhaeahnaddgnma
+if [ ! -f "$P" ]; then
+	echo '{"bookmark_bar":{"show_on_all_tabs":true},"extensions":{"pinned_extensions":["'$TVT'"]}}' > "$P"
+else
+	grep -q '"bookmark_bar"' "$P" || sed -i '1s/^{/{"bookmark_bar":{"show_on_all_tabs":true},/' "$P"
+	if ! grep -q '"pinned_extensions"' "$P"; then
+		if grep -q '"extensions":{' "$P"; then
+			sed -i '1s/"extensions":{/"extensions":{"pinned_extensions":["'$TVT'"],/' "$P"
+		else
+			sed -i '1s/^{/{"extensions":{"pinned_extensions":["'$TVT'"]},/' "$P"
+		fi
+	fi
+fi
+# Fresh start: webOS ends Chrome with a kill, and Chrome would restore every old tab on the next launch, until a dozen
+# pages shared the one renderer and the TV was swapping. Each launch starts with only the start page.
+rm -rf "$S/profile/Default/Sessions" "$S/profile/Default/Current Session" "$S/profile/Default/Current Tabs" \
+	"$S/profile/Default/Last Session" "$S/profile/Default/Last Tabs"
+
+# PRESEED (2026-11-18, IPK #4.5): Brave's adblock filter-list components, bundled in
+# <app>/preseed/<component-id>/<version>/ because the component updater is rejected
+# (403) on this build, so Shields would otherwise have no lists. On each launch, copy
+# a component into the profile when the profile has no valid version of it, or only
+# versions older than the bundled one. Never clobbers a newer version (e.g. one the
+# updater fetched later). No-op when <app>/preseed is absent. busybox sh only.
+ver_ge() {
+	_a=$1; _b=$2
+	while [ -n "$_a" ] || [ -n "$_b" ]; do
+		_as=${_a%%.*}; _bs=${_b%%.*}
+		_as=${_as:-0}; _bs=${_bs:-0}
+		[ "$_as" -gt "$_bs" ] 2>/dev/null && return 0
+		[ "$_as" -lt "$_bs" ] 2>/dev/null && return 1
+		case $_a in *.*) _a=${_a#*.};; *) _a=;; esac
+		case $_b in *.*) _b=${_b#*.};; *) _b=;; esac
+	done
+	return 0
+}
+if [ -d "$D/preseed" ]; then
+	for CD in "$D/preseed"/*/; do
+		[ -d "$CD" ] || continue
+		CID=${CD%/}; CID=${CID##*/}
+		BV=$(ls "$CD" 2>/dev/null | head -n 1)
+		[ -n "$BV" ] || continue
+		NEWEST=""
+		for VD in "$S/profile/$CID"/*/; do
+			[ -f "$VD/manifest.json" ] || continue
+			V=${VD%/}; V=${V##*/}
+			if [ -z "$NEWEST" ] || ver_ge "$V" "$NEWEST"; then NEWEST=$V; fi
+		done
+		if [ -n "$NEWEST" ] && ver_ge "$NEWEST" "$BV"; then continue; fi
+		rm -rf "$S/profile/$CID"
+		mkdir -p "$S/profile/$CID" && cp -r "$CD$BV" "$S/profile/$CID/$BV" 2>/dev/null
+	done
+fi
+
+# SUBSCRIPTIONS (2026-11-18, IPK #4.6): Brave's component updater is refused (403) on this build, so the preseeded
+# Default/Privacy lists above never update. Brave builds those lists from public upstream files (list_catalog.json
+# "sources"); subscribe to the main ones once, as Shields custom lists. Brave refreshes subscriptions by itself
+# (hourly check, each list's "! Expires:" header, max 14 days). Done once per profile (marker file), so lists the
+# user removes stay removed. Needs the 5 "additional engine" components in preseed/, or custom lists never load.
+# Local State is one line of JSON; Brave must not be running (it isn't: we exec it below).
+SUBS_URLS="https://easylist.to/easylist/easylist.txt|EasyList
+https://easylist.to/easylist/easyprivacy.txt|EasyPrivacy
+https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt|uBlock filters
+https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt|uBlock filters - Privacy
+https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt|uBlock filters - Badware risks
+https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt|uBlock filters - Quick fixes
+https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt|uBlock filters - Unbreak
+https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-specific.txt|Brave specific
+https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/brave-unbreak.txt|Brave unbreak"
+LS="$S/profile/Local State"
+if [ ! -f "$S/.subs-seeded" ]; then
+	E=""; OIFS=$IFS; IFS='
+'
+	for L in $SUBS_URLS; do
+		U=${L%%|*}; N=${L#*|}
+		[ -f "$LS" ] && grep -qF "\"$U\"" "$LS" && continue
+		E="$E${E:+,}\"$U\":{\"enabled\":true,\"title\":\"$N\"}"
+	done
+	IFS=$OIFS
+	if [ -z "$E" ]; then :
+	elif [ ! -s "$LS" ]; then
+		echo "{\"brave\":{\"ad_block\":{\"list_subscriptions\":{$E}}}}" > "$LS"
+	elif grep -q '"list_subscriptions":{}' "$LS"; then
+		sed -i "s|\"list_subscriptions\":{}|\"list_subscriptions\":{$E}|" "$LS"
+	elif grep -q '"list_subscriptions":{' "$LS"; then
+		sed -i "s|\"list_subscriptions\":{|&$E,|" "$LS"
+	elif grep -q '"ad_block":{}' "$LS"; then
+		sed -i "s|\"ad_block\":{}|\"ad_block\":{\"list_subscriptions\":{$E}}|" "$LS"
+	elif grep -q '"ad_block":{' "$LS"; then
+		sed -i "s|\"ad_block\":{|&\"list_subscriptions\":{$E},|" "$LS"
+	elif grep -q '"brave":{}' "$LS"; then
+		sed -i "s|\"brave\":{}|\"brave\":{\"ad_block\":{\"list_subscriptions\":{$E}}}|" "$LS"
+	elif grep -q '"brave":{' "$LS"; then
+		sed -i "s|\"brave\":{|&\"ad_block\":{\"list_subscriptions\":{$E}},|" "$LS"
+	elif grep -q '^{}$' "$LS"; then
+		echo "{\"brave\":{\"ad_block\":{\"list_subscriptions\":{$E}}}}" > "$LS"
+	else
+		sed -i "1s|^{|{\"brave\":{\"ad_block\":{\"list_subscriptions\":{$E}}},|" "$LS"
+	fi
+	touch "$S/.subs-seeded"
+fi
+
+if [ -x "$B/chrome" ]; then
+	# UI scale: a 1920x1080 window at the panel's resolution with the UI laid out at 1.5x (1280x720 DIP), so text is
+	# sharp (patch 0032). --window-size: see BRAVE 157 FIXES below.
+	# Memory (the app gets roughly 700 MB on a TV):
+	#   --disable-rgba-4444-textures   low-end mode rasters into 16-bit tiles, and light greys turned white with GPU
+	#                                  raster (the New Tab search box vanished)
+	#   --disable-dev-shm-usage        the TV's /dev/shm is a 64 MB tmpfs; with 2+ renderers it filled up and the
+	#                                  renderer died ("Aw, Snap!"). Shared memory lives in /tmp instead.
+	#   --in-process-gpu               no separate GPU process
+	#   --disable-site-isolation-trials, IsolateOrigins/site-per-process off   one renderer for all sites
+	#   --isolate-origins=https://challenges.cloudflare.com   except Cloudflare's challenge frame, which gets its own
+	#                                  renderer as in normal Chrome. In the page's renderer the check passed the click,
+	#                                  then the site refused the pass and challenged again (issue #11, 2026-11-14).
+	#   --disable-component-extensions-with-background-pages, --disable-sync   fewer background processes
+	#   NetworkServiceInProcess2 on, AudioServiceOutOfProcess off               two utility processes fewer
+	#   WebUIToolbar*, WebUIReloadButton, WebUILocationBar, WebUIOmnibox*Popup off   native toolbar and omnibox
+	#                                  popups, no extra hidden renderers
+	#   JS heap 192 MB: all tabs share one renderer, so this cap is for all tabs together.
+	#   --mse-*-buffer-size-limit-mb   caps how much video a page buffers (YouTube kept ~90 s)
+	# NetworkTimeServiceQuerying off: Chrome asked clients2.google.com for the time at every start (the TV keeps its own
+	#   clock).
+	# GPU: the TV's PowerVR/Mali GLES drivers (patch 0019, validating command decoder); the flags follow LG's own web
+	#   app manager with a smaller GPU memory budget.
+	#   --use-cmd-decoder=validating   the passthrough decoder needs ANGLE extensions the TV drivers lack (no WebGL)
+	#   WebGPUService, WebGPUBlobCache off   Dawn on the TV's GLES driver killed the GPU thread, and with
+	#                                  --in-process-gpu the whole browser; pages fall back to WebGL/canvas
+	# HardwareMediaKeyHandling off: Chrome sends media keys over D-Bus (MPRIS), which the TV lacks; off, they reach the
+	#   page as keydown and TV Tools plays/pauses.
+	# Priority: webOS gives the foreground app nice -8 and every Chrome thread inherits it, so Chrome starved LG's own
+	#   services (volume OSD, input). This loop puts Chrome's threads back to nice 0 (no root needed), except the
+	#   threads that pace video and frames (compositor, GPU, media, audio): at nice 0 they were preempted and video
+	#   froze for ~0.5 s every few seconds. It ends with Chrome.
+	( while sleep 3; do
+		n=0
+		for c in /proc/[0-9]*; do
+			[ "$c/exe" -ef "$B/chrome" ] || continue   # shell builtin, no fork per process
+			n=1
+			for t in $c/task/*; do
+				read -r s < "$t/stat" 2>/dev/null || continue
+				read -r nm < "$t/comm" 2>/dev/null
+				case "$nm" in Compositor*|VizCompositor*|CrGpuMain|Chrome_InProcGp*|Media*|Audio*|Video*) continue ;; esac
+				set -- ${s##*) }
+				[ "${17:-0}" -lt 0 ] 2>/dev/null && renice 0 -p "${t##*/}" >/dev/null 2>&1
+			done
+		done
+		[ $n = 0 ] && [ -f "$T/.started" ] && exit 0
+		[ $n = 1 ] && touch "$T/.started"
+	done ) </dev/null >/dev/null 2>&1 &
+	rm -f "$T/.started"
+	# Hardware video (patch 0023): the launcher exports CN_MEDIA_SOCK when LG's NDL is usable. The built-in TV Tools
+	# extension reads hw.json: its "Auto" video limit is any codec up to 1080p60 with hardware decoding, H.264 up to
+	# 720p30 without. The installed ext/ is read-only, so TV Tools runs from a copy in the data folder (refreshed when the
+	# app version changes); the manifest "key" keeps its extension id.
+	EXT=$S/ext/tvtools
+	# refreshed when the app version changes or the shipped extension differs from the copy (e.g. a patched ext/)
+	V=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$D/appinfo.json")
+	X=$(ls -lnR "$D/ext/tvtools" 2>/dev/null | tr -s ' ' | tr '\n' ';')   # sizes and times (no md5sum in the jail)
+	if [ "$(cat "$S/ext/.version" 2>/dev/null)" != "$V $X" ] || [ ! -f "$EXT/manifest.json" ]; then
+		# A new TV Tools version needs a new service worker registration. Chrome keeps the worker it registered
+		# first (registering the same script URL again returns the old registration), so a changed bg.js never ran.
+		# Without a registration Chrome registers the shipped bg.js. Sites' service workers register again on their
+		# next visit.
+		TVO=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$EXT/manifest.json" 2>/dev/null)
+		TVN=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$D/ext/tvtools/manifest.json" 2>/dev/null)
+		[ "$TVO" != "$TVN" ] && rm -rf "$S/profile/Default/Service Worker"
+		rm -rf "$S/ext" && mkdir -p "$S/ext" && cp -r "$D/ext/tvtools" "$EXT" && echo "$V $X" > "$S/ext/.version" ||
+			EXT=$D/ext/tvtools
+	fi
+	# GPU check: the launcher sets CN_GPU=off on TVs where its GPU check fails; Chrome then draws in software.
+	GPU_OFF=; [ "$CN_GPU" = off ] && GPU_OFF=--disable-gpu
+	# WebGPU is off by default (see above); media.opts "webgpu=on" turns it on.
+	WEBGPU_OFF=,WebGPUService,WebGPUBlobCache
+	grep -q 'webgpu=on' "$T/media.opts" 2>/dev/null && WEBGPU_OFF=
+	# Launch parameters arrive as one JSON argument, e.g. {"target": "https://...", "fullscreen": true} (LG's own browser
+	# reads "target"). Only http(s) targets are opened; "fullscreen": true adds --start-fullscreen.
+	URL= FULL=
+	case "$1" in
+	\{*)
+		URL=$(printf '%s' "$1" | sed -n 's/.*"target"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed 's#\\/#/#g')
+		case "$URL" in http://*|https://*) ;; *) URL= ;; esac
+		printf '%s' "$1" | grep -q '"fullscreen"[[:space:]]*:[[:space:]]*true' && FULL=--start-fullscreen
+		shift ;;
+	esac
+	# Last log on flash, so logs survive a forced restart and users without root can read them: a memory line
+	# (MemAvailable, SwapFree, RSS of all chrome processes) once a minute in RAM ($T/mem.txt); 20 s after the start, then
+	# once a minute and when the browser ends, the tail of browser.log, media.log and mem.txt go to $S/lastlog. Each start
+	# moves the previous session's copy to $S/lastlog.prev.
+	# Brave 1.99.5854: a close by webOS (closeByAppId, Beanjar 4.4.3) killed this writer before its final save, and the
+	# copy was only made every 5 minutes, so a short session left lastlog empty. Hence the minute copy, and a save on
+	# SIGTERM/SIGHUP/SIGINT (sleep runs in the background so that "wait" lets the trap run at once).
+	CL=$S/lastlog
+	if [ "$S" != "$T" ]; then
+		rm -rf "$CL.prev"; [ -d "$CL" ] && mv "$CL" "$CL.prev"; mkdir -p "$CL"
+		( save() {
+			tail -n 400 "$T/browser.log" > "$CL/browser.log" 2>/dev/null; cp -f "$T/media.log" "$CL/media.log" 2>/dev/null
+			cp -f "$T/mem.txt" "$CL/mem.txt" 2>/dev/null
+		  }
+		  trap 'echo "$(date "+%F %T") closed (signal)" >> "$T/mem.txt"; save; exit 0' TERM HUP INT
+		  : > "$T/mem.txt"; s=20
+		  while :; do
+			sleep $s & wait $!
+			s=60
+			kill -0 $$ 2>/dev/null || break
+			rss=0
+			for c in /proc/[0-9]*; do
+				[ "$c/exe" -ef "$B/chrome" ] || continue
+				while read -r k v _; do [ "$k" = VmRSS: ] && rss=$((rss + v)); done < "$c/status"
+			done
+			echo "$(date '+%F %T') chrome_rss_kb=$rss $(awk '/^(MemAvailable|SwapFree):/{printf "%s%s ", $1, $2}' /proc/meminfo)" >> "$T/mem.txt"
+			[ "$(wc -l < "$T/mem.txt")" -gt 1500 ] && { tail -n 1000 "$T/mem.txt" > "$T/mem.tmp"; mv -f "$T/mem.tmp" "$T/mem.txt"; }
+			save
+		  done
+		  echo "$(date '+%F %T') browser ended" >> "$T/mem.txt"; save ) </dev/null >/dev/null 2>&1 &
+	fi
+	# webOS 4 (CN_NDL_API=old, NDL API 1): the hardware decoder takes only H.264, so "h264": true makes TV Tools offer
+	# sites only H.264 (Auto = 1080p30); VP9/AV1 in software would run a small TV out of memory. After a failed API 1
+	# call the launcher writes "bad" to $T/hw.state, and TV Tools gets hardware false (H.264 720p30).
+	HW=false; H264=false; [ -n "$CN_MEDIA_SOCK" ] && HW=true
+	if [ "$CN_NDL_API" = old ]; then
+		H264=true; grep -q '^bad' "$T/hw.state" 2>/dev/null && HW=false
+	fi
+	HWJ="{\"hardware\": $HW, \"h264\": $H264}"
+	[ "$(cat "$EXT/hw.json" 2>/dev/null)" = "$HWJ" ] || echo "$HWJ" > "$EXT/hw.json" 2>/dev/null
+	# A failure during this session: switch hw.json to software too (TV Tools reads it when its worker starts again).
+	# $$ becomes Chrome's pid after the exec below, so the watcher ends with Chrome.
+	if [ "$CN_NDL_API" = old ] && [ "$HW" = true ]; then
+		( while sleep 5; do
+			kill -0 $$ 2>/dev/null || exit 0
+			grep -q '^bad' "$T/hw.state" 2>/dev/null && { echo '{"hardware": false, "h264": true}' > "$EXT/hw.json"; exit 0; }
+		done ) </dev/null >/dev/null 2>&1 &
+	fi
+	# NSS ships in <app>/lib (webOS 4 has none). Say so in start-check.log when it is missing (the exec below truncates
+	# browser.log).
+	rm -f "$T/start-check.log"
+	if [ ! -f "$D/lib/libnss3.so" ] && [ ! -f /usr/lib/libnss3.so ]; then
+		echo "libnss3.so not found in $D/lib or /usr/lib" > "$T/start-check.log"
+	fi
+	# chrome has no RUNPATH, so the shipped NSS/NSPR is found through LD_LIBRARY_PATH. It comes first on every TV: one
+	# tested set (libnss3 dlopens libsoftokn3/libfreebl3 from its own folder) instead of the TV's own, which differs per
+	# model.
+	# BRAVE: SHIELDS (2026-11-18, P6): --disable-component-update + --disable-background-networking REMOVED -- they starved Brave's Ad Block Updater, so Shields had no filter lists (BBC panel showed 0 blocked). The updater needs both; component update is default-on, no counter-flag exists.
+	# NSS (2026-11-18, 4.4): the 4.4 TV ships no NSS/NSPR libs at all; the IPK bundles NSS 3.125
+	# under <app>/lib -- put it first on the loader path, only when present.
+	# BRAVE 157 FIXES (2026-11-18, IPK #4.7, twin-verified):
+	#   --use-cmd-decoder=validating  Chromium 157 defaults to the passthrough GL decoder, which CHECKs for ANGLE
+	#                                 (gles2_cmd_decoder_passthrough.cc Initialize) and killed the browser (SIGTRAP,
+	#                                 status 133) when a page made a GL context (YouTube). The build has the validating
+	#                                 decoder (args.gn enable_validating_command_decoder=true); the Chromium app uses it.
+	#   --window-size=1280,720        157 reads --window-size as DIP and multiplies by the 1.5 scale (151 read pixels):
+	#                                 1920,1080 gave a 2880x1620 window that overflowed the screen. 1280,720 -> 1920x1080.
+	#   --skip-origin-startup-dialog  (2026-11-19, IPK 1.99.5851) Brave Origin's own switch: skips the startup dialog
+	#                                 (chrome://brave-origin-startup/) and accepts the free tier. On a fresh profile that
+	#                                 dialog was the only window and the TV never showed it, so the splash stayed.
+	[ -f "$D/lib/libnss3.so" ] && export LD_LIBRARY_PATH="$D/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	# Sound Chrome plays itself (WebRTC, WebAudio, page audio) goes to the TV's system PulseAudio; libpulse would look
+	# in $XDG_RUNTIME_DIR/pulse and find nothing. Hardware video has its own audio path.
+	if [ -S /var/run/pulse/native ]; then
+		mkdir -p "$T/pulse"
+		export PULSE_SERVER=unix:/var/run/pulse/native PULSE_RUNTIME_PATH=$T/pulse
+	fi
+	# Screen saver: patch 0049 writes the number of playing media sessions to $CN_PLAYSTATE_FILE; the launcher's screen
+	# saver guard answers webOS's screen saver requests from it.
+	export CN_PLAYSTATE_FILE=$T/playstate
+	echo 0 > "$CN_PLAYSTATE_FILE"
+	set -f; IFS='
+'   # $EXTRA: one argument per line (see browser.flags above)
+	exec "$B/chrome" \
+		--load-extension="$EXT" \
+		--mse-video-buffer-size-limit-mb=40 --mse-audio-buffer-size-limit-mb=6 \
+		--ozone-platform=wayland --no-sandbox --no-zygote $APPID_FLAGS \
+		--user-data-dir="$S/profile" --disk-cache-dir="$S/cache" --disk-cache-size=33554432 \
+		--enable-low-end-device-mode --disable-rgba-4444-textures --renderer-process-limit=1 --process-per-site \
+		--disable-dev-shm-usage --in-process-gpu --disable-site-isolation-trials \
+		--isolate-origins=https://challenges.cloudflare.com \
+		--use-gl=egl --use-cmd-decoder=validating --ignore-gpu-blocklist --enable-gpu-rasterization --disable-oop-rasterization \
+		--enable-threaded-compositing --force-gpu-mem-available-mb=128 --gpu-program-cache-size-kb=2048 \
+		--mem-pressure-gpu-cache-size-reduction-factor=4 \
+		--disable-component-extensions-with-background-pages --num-raster-threads=1 \
+		--enable-features=NetworkServiceInProcess2 \
+		--disable-features=Translate,OptimizationHints,MediaRouter,BackForwardCache,Vulkan,ContextualTasks,ContextualTasksContext,ContextualTasksSidePanel,PreloadTopChromeWebUI,SpareRendererForSitePerProcess,SpareRenderer,OptimizationGuideModelDownloading,IsolateOrigins,site-per-process,WebUIToolbar,WebUIToolbarWebView,WebUIToolbarInternalWebView,WebUIReloadButton,WebUILocationBar,AudioServiceOutOfProcess,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIOmniboxFullPopup,DisableLoadExtensionCommandLineSwitch,HardwareMediaKeyHandling,NetworkTimeServiceQuerying$WEBGPU_OFF --disable-sync \
+		--js-flags="--max-old-space-size=192 --optimize-for-size" \
+		--no-first-run --skip-origin-startup-dialog --no-default-browser-check --disable-breakpad \
+		--password-store=basic --autoplay-policy=no-user-gesture-required \
+		--enable-neva-ime --enable-spatial-navigation --hide-crash-restore-bubble --start-maximized --lang=en-US \
+		--force-device-scale-factor=1.5 --window-size=1280,720 --window-position=0,0 \
+		$GPU_OFF $FULL $EXTRA "$@" ${URL:+"$URL"} > "$T/browser.log" 2>&1
+fi
+echo "browser/chrome is missing or not executable" > "$T/start-check.log"
+exit 1
