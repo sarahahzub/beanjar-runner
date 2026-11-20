@@ -9,6 +9,8 @@
 #   cdp.py ae                       focused element (through shadow roots and same-origin iframes) of every page
 #                                   target that has focus (else of the visible ones), plus the test page's log
 #   cdp.py pages                    page targets (type, url)
+#   cdp.py tid                      id of the first tab-like page target (env CDP_TID pins page() to it)
+#   cdp.py closepop                 close extension popups / WebUI bubbles
 import json, os, sys, time, urllib.request
 import websocket
 
@@ -20,10 +22,21 @@ def get(path):
         return json.loads(r.read())
 
 
+def tab_like(t):
+    u = t.get("url", "")
+    return t.get("type") == "page" and not u.startswith("chrome-extension://") and "top-chrome" not in u
+
+
 def page():
     m = os.environ.get("CDP_MATCH", "")
-    for t in get("/json/list"):
-        if t.get("type") == "page" and m in t.get("url", ""):
+    tid = os.environ.get("CDP_TID", "")
+    ts = get("/json/list")
+    if tid and not m:
+        for t in ts:
+            if t.get("id") == tid:
+                return t
+    for t in ts:
+        if tab_like(t) and m in t.get("url", ""):
             return t
     raise SystemExit(json.dumps({"error": "no page target"}))
 
@@ -132,6 +145,15 @@ def main():
                           "blocked_sample": [b.get("errorText") for b in blocked[:3]], "page": info}))
     elif cmd == "ae":
         ae()
+    elif cmd == "tid":
+        print(next((t["id"] for t in get("/json/list") if tab_like(t)), ""))
+    elif cmd == "closepop":  # close extension popups and WebUI bubbles (test set-up only)
+        n = 0
+        for t in get("/json/list"):
+            if t.get("type") == "page" and not tab_like(t):
+                urllib.request.urlopen(BASE + "/json/close/" + t["id"], timeout=10).read()
+                n += 1
+        print(n)
     elif cmd == "pages":
         print(json.dumps([t.get("url") for t in get("/json/list") if t.get("type") == "page"]))
     elif cmd == "eval":
