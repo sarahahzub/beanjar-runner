@@ -30,9 +30,10 @@ ybox() { # box of the popup's yellow background in a screenshot
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert("RGB"); w, h = im.size; px = im.load()
-xs = [x for x in range(0, w, 2) for y in range(0, h, 2) if abs(px[x, y][0] - 255) < 30 and abs(px[x, y][1] - 212) < 30 and px[x, y][2] < 60]
-ys = [y for x in range(0, w, 2) for y in range(0, h, 2) if abs(px[x, y][0] - 255) < 30 and abs(px[x, y][1] - 212) < 30 and px[x, y][2] < 60]
-print("%d %d %d %d" % (min(xs), min(ys), max(xs), max(ys)) if len(xs) > 200 else "none")
+pts = [(x, y) for x in range(0, w, 2) for y in range(0, h, 2)
+       if abs(px[x, y][0] - 255) < 8 and abs(px[x, y][1] - 212) < 8 and px[x, y][2] < 20]
+print("%d %d %d %d" % (min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
+      if len(pts) > 3000 else "none")
 EOF
 }
 
@@ -79,9 +80,9 @@ BASE=$(snap base)
 
 step extkb-control
 mark
-ce "chrome://newtab" "location.href='data:text/html,<body style=margin:0><textarea id=t style=\"width:900px;height:300px;font-size:30px;margin:40px\"></textarea>'" >/dev/null
+res control_nav "$(timeout 60 python3 /w/extcdp.py nav "chrome://newtab" 'data:text/html,<body style="margin:0"><textarea id="t" style="width:900px;height:300px;font-size:30px;margin:40px"></textarea>' 2>&1 | tail -1)"
 sleep 8; C0=$(snap control-0)
-timeout 30 beanjar remote click tv1 400 300 >>"$OUT/logs/remote.log" 2>&1; sleep 6
+timeout 30 beanjar remote click tv1 400 350 >>"$OUT/logs/remote.log" 2>&1; sleep 6
 C1=$(snap control-1)
 res control_kb "$(rd "$C0" "$C1") msgs=[$(msgs control)]"
 press ENTER; sleep 4; snap control-2 >/dev/null
@@ -89,10 +90,13 @@ res control_typed "$(ce "data:" "document.getElementById('t').value")"
 press BACK; sleep 3; press BACK; sleep 3
 blog control
 
+# The extension's icon is pinned next to TV Tools. Its toolbar position is read from the first screenshot: the icon
+# left of the extensions (puzzle) button, IX,IY below (1280x720 frame). The pointer click opens the popup, like a user.
+IX=${IX:-1127}; IY=${IY:-63}
 open_popup() { # $1 name
-	local r; r=$(ce "chrome-extension://$EID/bg.js" "chrome.action.openPopup().then(()=>'ok',e=>'err '+e.message)")
-	sleep 6; local s; s=$(snap "$1-open")
-	res "$1_openpopup" "$r targets=$(targets | grep -o "chrome-extension://$EID/popup.html" | head -1) box=$(ybox "$s")"
+	timeout 30 beanjar remote click tv1 $IX $IY >>"$OUT/logs/remote.log" 2>&1
+	sleep 8; local s; s=$(snap "$1-open")
+	res "$1_openpopup" "click=$IX,$IY targets=$(targets | grep -o "chrome-extension://$EID/popup.html" | head -1) box=$(ybox "$s")"
 	echo "$s"; }
 
 step extkb-pointer
