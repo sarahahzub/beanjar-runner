@@ -115,24 +115,5 @@ toolbar() { goto "y0>=38 and y1<=90" UP 4; }  # UP until the focus ring is in th
 POS=$B/toolbar-positions.txt
 pf() { k DOWN; timeout 25 python3 /w/cdp.py ae 2>/dev/null | grep -q '"focused"' || k DOWN; }  # after a CDP navigation the omnibox keeps focus: DOWN moves it into the page
 
-menu() { fresh; nav $W/a.html; base; pf; toolbar; goto "x>1235 and y0>=38" LEFT 4; k ENTER; sleep 2; }
-iw() { cdp eval "innerWidth+' dpr='+devicePixelRatio"; }
-st exit "menu: OK opens, UP wraps to the last item (Exit), OK"
-menu; FG=1 k UP; FG=1 k ENTER; sleep 12; obs menu_exit "fg=$(fg | tail -1) procs=[$(procs)]"; snap "$OUT/shots/exit-after.png"
-st mwalk "menu: DOWN x22 through the items, then BACK"
-menu; kn 22 DOWN; k BACK; sleep 2; k BACK
-st msub "menu: DOWN x5 (Chromium: History), RIGHT opens, DOWN, LEFT closes, OK opens, BACK closes, DOWN x2 (Bookmarks and lists) RIGHT, LEFT"
-menu; kn 5 DOWN; k RIGHT; sleep 2; k DOWN LEFT; k ENTER; sleep 2; k BACK; kn 2 DOWN; k RIGHT; sleep 2; k LEFT; kn 8 DOWN; k RIGHT; sleep 2; k LEFT; k DOWN DOWN RIGHT; sleep 2; k LEFT; k BACK
-st zoom "menu: DOWN x11 (Chromium: Zoom row), RIGHT, OK, RIGHT, OK, RIGHT (fullscreen button, no OK), BACK"
-menu; w0=$(iw); kn 11 DOWN; k RIGHT; k ENTER; sleep 2; w1=$(iw); k RIGHT; k ENTER; sleep 2; w2=$(iw); k RIGHT; k LEFT LEFT LEFT; k ENTER; sleep 2; w3=$(iw)
-obs zoom "start=$w0 after_OK1=$w1 after_OK2=$w2 after_OK3=$w3"; k BACK
-st find "menu: DOWN x15 (Chromium: Find and edit), RIGHT, OK (Find...), find bar: DOWN, RIGHT, BACK"
-menu; kn 15 DOWN; k RIGHT; sleep 2; k ENTER; sleep 3; k DOWN RIGHT LEFT; k BACK; sleep 2
-st carousel "carousel: CDP focus card 1, RIGHT x6"
-fresh; nav $W/t.html 6; base; pf; cf c1 >/dev/null; kn 6 RIGHT; obs carousel "scrollLeft=$(cdp eval "document.getElementById('car').scrollLeft") $(timeout 25 python3 /w/cdp.py ae | cut -c1-200)"
-st scrdiv "scrollable div: UP from the iframe into it, DOWN/UP inside"
-cdp eval "(function(){var f=document.getElementById('ifr');f.scrollIntoView({block:'center'});f.contentDocument.getElementById('f1').focus();return 1})()" >/dev/null
-kn 3 UP; obs scrdiv_up "scrollTop=$(cdp eval "document.getElementById('scr').scrollTop")"; kn 3 DOWN; obs scrdiv_down "scrollTop=$(cdp eval "document.getElementById('scr').scrollTop")"
-res dpad_result "done"
-close >/dev/null; sleep 5
-pkill -f 'ssh .*-L 9222' 2>/dev/null; pkill -f 'ssh .*-R 8000' 2>/dev/null
+# brave-parity (1.99.5855 vs 1.99.5856): the sections are in dpad-parity.sh
+. /w/dpad-parity.sh

@@ -69,10 +69,11 @@ jobs:
           KERNEL: ${{ matrix.kernel }}
           BOOT_MIN: ${{ inputs.boot_min }}
           MODE: ${{ inputs.mode }}
+          SUITE: ${{ matrix.suite || 'full' }}
         run: |
           mkdir -p out && cp fw/zip.sha256 fw/headers.txt out/
           sudo docker run --rm --privileged --device /dev/kvm -v "$PWD:/w" \
-            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e OUT=/w/out \
+            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e SUITE="$SUITE" -e OUT=/w/out \
             debian:trixie bash /w/run.sh
           echo "---- results"; cat out/results.txt
       - name: Readable outputs
