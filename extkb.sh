@@ -25,6 +25,17 @@ mark() { ML=$(gsh "wc -l < /var/log/messages" | tail -1 | tr -dc 0-9); }
 msgs() { gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -i -E 'ime|keyboard|vkb|maliit|NL_VSC' | grep -v -E 'NL_SSG|HOMEHUB' | tail -12" > "$B/msgs-$1.txt"
 	tr '\n' ' ' < "$B/msgs-$1.txt" | cut -c1-500; }
 blog() { gsh "tail -n 60 $T/browser.log 2>/dev/null | grep -v -E 'dbus|LD_PRELOAD|create_wl_buffer'" > "$B/browser-$1.txt"; }
+lit() { python3 -c "import sys;from PIL import Image,ImageStat;print(int(ImageStat.Stat(Image.open(sys.argv[1]).convert('L')).mean[0]))" "$1" 2>/dev/null || echo 0; }
+ready() { # $1 name: the browser in front and drawn (not a black frame) before a test; relaunch if needed
+	local i a s l
+	for i in 1 2 3 4 5 6 7 8; do
+		a=$(fg | tail -1); s=$(snap "$1-ready"); l=$(lit "$s")
+		[ "$a" = "$ID" ] && [ "$l" -gt 40 ] && { res "$1_ready" "try=$i fg=$a lit=$l"; return 0; }
+		timeout 60 beanjar screensaver stop tv1 >/dev/null 2>&1
+		[ "$a" = "$ID" ] || launch >/dev/null
+		sleep 12
+	done
+	res "$1_ready" "NOT ready: fg=$a lit=$l"; return 1; }
 ybox() { # box of the popup's yellow background in a screenshot
 	python3 - "$1" <<'EOF'
 import sys
@@ -39,6 +50,9 @@ EOF
 
 step extkb-prep
 (timeout 6000 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15
+# LG's screen saver comes back after about 4 minutes without input and turns the frame black: keep it away
+( while sleep 45; do timeout 40 beanjar screensaver stop tv1 >/dev/null 2>&1; done ) &
+SSLOOP=$!
 timeout 90 beanjar screensaver stop tv1 --json > "$OUT/logs/screensaver-stop.json" 2>&1; res screensaver_stop_rc $?
 press HOME; sleep 8
 
@@ -79,9 +93,10 @@ res ext_loaded "$(grep -c "chrome-extension://$EID" "$B/targets-start.json")"
 BASE=$(snap base)
 
 step extkb-control
+ready control
 mark
 res control_nav "$(timeout 60 python3 /w/extcdp.py nav "chrome://newtab" 'data:text/html,<body style="margin:0"><textarea id="t" style="width:900px;height:300px;font-size:30px;margin:40px"></textarea>' 2>&1 | tail -1)"
-sleep 8; C0=$(snap control-0)
+sleep 15; C0=$(snap control-0); res control_lit "$(lit "$C0")"
 timeout 30 beanjar remote click tv1 400 350 >>"$OUT/logs/remote.log" 2>&1; sleep 6
 C1=$(snap control-1)
 res control_kb "$(rd "$C0" "$C1") msgs=[$(msgs control)]"
@@ -93,13 +108,16 @@ blog control
 # The extension's icon is pinned next to TV Tools. Its toolbar position is read from the first screenshot: the icon
 # left of the extensions (puzzle) button, IX,IY below (1280x720 frame). The pointer click opens the popup, like a user.
 IX=${IX:-1127}; IY=${IY:-63}
-open_popup() { # $1 name
+open_popup() { # $1 name: click the icon, then up to 40 s for the popup to be drawn
 	timeout 30 beanjar remote click tv1 $IX $IY >>"$OUT/logs/remote.log" 2>&1
-	sleep 8; local s; s=$(snap "$1-open")
-	res "$1_openpopup" "click=$IX,$IY targets=$(targets | grep -o "chrome-extension://$EID/popup.html" | head -1) box=$(ybox "$s")"
+	local s b i
+	for i in 1 2 3 4 5 6 7 8; do sleep 5; s=$(snap "$1-open"); b=$(ybox "$s"); [ "$b" != none ] && break; done
+	res "$1_openpopup" "click=$IX,$IY after=$((i * 5))s targets=$(targets | grep -o "chrome-extension://$EID/popup.html" | head -1) box=$b lit=$(lit "$s")"
 	echo "$s"; }
 
 step extkb-pointer
+ce "data:" "history.back()" >/dev/null; sleep 8
+ready pointer
 mark
 S=$(open_popup pointer | tail -1)
 BOX=$(ybox "$S")
@@ -118,6 +136,7 @@ blog pointer
 press BACK; sleep 3; ce "popup.html" "window.close()" >/dev/null; sleep 3
 
 step extkb-ok
+ready ok
 mark
 S=$(open_popup ok | tail -1)
 res ok_focus "$(ce "popup.html" "(function(){var u=document.getElementById('user');u.focus();return (document.activeElement||{}).id})()")"
@@ -132,6 +151,7 @@ res ok_typed "$(ce "popup.html" "JSON.stringify({v:document.getElementById('user
 blog ok
 press BACK; sleep 3
 
+kill $SSLOOP 2>/dev/null
 res extkb_result "done"
 close >/dev/null; sleep 5
 pkill -f 'ssh .*-L 9222' 2>/dev/null
