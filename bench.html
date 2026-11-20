@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Bean Bench</title></head>
+<body style="background:#123;color:#fff;font:40px sans-serif">
+<div id="o">Bean Bench: running</div>
+<script>
+var T0 = Date.now();
+function b(d) { new Image().src = "http://127.0.0.1:8099/b?d=" + encodeURIComponent(JSON.stringify(d)) + "&r=" + Math.random(); }
+b({k: "start", e: T0});
+requestAnimationFrame(function () { requestAnimationFrame(function () { b({k: "ff", e: Date.now()}); }); });
+function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+setTimeout(function () {
+  var r = {k: "res"}, a;
+  a = performance.now(); fib(27); r.fib27_ms = Math.round(performance.now() - a);
+  a = performance.now(); var x = []; for (var i = 0; i < 300000; i++) x.push(Math.random());
+  x.sort(function (p, q) { return p - q; }); r.sort300k_ms = Math.round(performance.now() - a);
+  a = performance.now(); var s = ""; for (i = 0; i < 300000; i++) s += i; r.str300k_ms = Math.round(performance.now() - a);
+  a = performance.now(); var d = document.createElement("div");
+  for (i = 0; i < 2000; i++) { var e = document.createElement("span"); e.textContent = i; d.appendChild(e); }
+  document.body.appendChild(d); d.offsetHeight; r.dom2k_ms = Math.round(performance.now() - a);
+  r.ua = navigator.userAgent.slice(0, 120);
+  document.getElementById("o").textContent = "BENCH " + JSON.stringify(r);
+  d.remove();
+  b(r);
+}, 500);
+</script>
+</body></html>

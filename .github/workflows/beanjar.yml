@@ -12,6 +12,9 @@ on:
       boot_min:
         description: minutes to wait for the TV UI
         default: "25"
+      mode:
+        description: smoke | bench
+        default: smoke
 
 permissions:
   contents: read
@@ -44,10 +47,11 @@ jobs:
         env:
           KERNEL: ${{ matrix.kernel }}
           BOOT_MIN: ${{ inputs.boot_min }}
+          MODE: ${{ inputs.mode }}
         run: |
           mkdir -p out && cp fw/zip.sha256 fw/headers.txt out/
           sudo docker run --rm --privileged --device /dev/kvm -v "$PWD:/w" \
-            -e FW_ZIP=/w/fw/fw.zip -e KERNEL -e BOOT_MIN -e OUT=/w/out \
+            -e FW_ZIP=/w/fw/fw.zip -e KERNEL -e BOOT_MIN -e MODE -e OUT=/w/out \
             debian:trixie bash /w/run.sh
           echo "---- results"; cat out/results.txt
       - name: Readable outputs

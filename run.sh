@@ -63,7 +63,9 @@ VMDIR=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' 
 SSH_ROOT=""
 gsh() { [ -n "$SSH_ROOT" ] || SSH_ROOT=$(beanjar info tv1 --json 2>/dev/null | python3 -c 'import json,sys;print(json.load(sys.stdin).get("ssh",{}).get("root",""))' 2>/dev/null)
 	[ -n "$SSH_ROOT" ] || { echo "no root ssh"; return 1; }
-	timeout 60 ${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ConnectTimeout=10 } "$1" 2>&1 </dev/null; }
+	timeout 60 ${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ConnectTimeout=10 } "exec </dev/null; $1" 2>&1 </dev/null; }
+gshl() { timeout 1000 ${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ConnectTimeout=10 } "exec </dev/null; $1" 2>&1 </dev/null; }
+gsh_in() { timeout 300 ${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ConnectTimeout=10 } "$1" 2>&1; }  # stdin passed through
 qmp() { # QMP command JSON lines from argv, prints replies
 	python3 - "$VMDIR/run/qmp.sock" "$@" <<'EOF'
 import json, socket, sys
@@ -89,6 +91,7 @@ bootdone() { gsh "grep -h -E 'SIGNAL_boot-done|POWERSTATUS' /var/log/bootd.log 2
 press() { timeout 30 beanjar remote press tv1 "$@" >>"$OUT/logs/remote.log" 2>&1 || echo "remote press $* failed (rc $?)" | tee -a "$OUT/logs/remote.log"; }
 vmstat_line() { ps -o %cpu=,rss= -p "$(pgrep -d, -f 'qemu-system-' || echo 1)" 2>/dev/null | awk '{c+=$1; r+=$2} END {printf "qemu_cpu=%s%% qemu_rss_mb=%d", c, r/1024}'; }
 
+if [ "${MODE:-smoke}" = bench ]; then . /w/bench.sh; chmod -R a+rwX "$OUT" 2>/dev/null; exit 0; fi
 step start
 t=$(date +%s)
 timeout 600 beanjar start tv1 >"$OUT/logs/start.log" 2>&1; rc=$?
@@ -135,8 +138,9 @@ if [ -n "$booted" ]; then
 	step devmode-ipk
 	(npm install -g --silent @webos-tools/cli >"$OUT/logs/npm.log" 2>&1) && {
 		mkdir -p /tmp/app && cd /tmp/app
-		echo '{"id":"org.bean.hello","version":"1.0.0","vendor":"bean","type":"web","main":"index.html","title":"Bean Hello"}' > appinfo.json
+		echo '{"id":"org.bean.hello","version":"1.0.0","vendor":"bean","type":"web","main":"index.html","title":"Bean Hello","icon":"icon.png"}' > appinfo.json
 		echo '<html><body style="background:#2a6;color:#fff;font-size:80px">Hello from Beanjar</body></html>' > index.html
+		python3 -c 'from PIL import Image; Image.new("RGB",(80,80),(40,160,90)).save("icon.png")'
 		ares-package -n . -o /tmp >"$OUT/logs/ares.log" 2>&1
 		IPK=$(ls /tmp/org.bean.hello_*.ipk 2>/dev/null | head -1)
 		timeout 300 beanjar ares-install -d tv1 "$IPK" >>"$OUT/logs/ares.log" 2>&1; res ipk_install_rc $?
