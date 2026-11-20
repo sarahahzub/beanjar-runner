@@ -1,0 +1,59 @@
+# Boot LG firmware in Beanjar (webosbrew/beanjar v0.6.0) on free GitHub runners and smoke-test it.
+# The firmware is downloaded from LG's own server (gscs-b2c.lge.com) at run time; it is never
+# committed or uploaded (the artifact holds only screenshots, logs and results).
+name: beanjar
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: 'JSON list of {name, fileid, kernel (x86-64|default), runner}'
+        required: true
+      boot_min:
+        description: minutes to wait for the TV UI
+        default: "25"
+
+permissions:
+  contents: read
+
+jobs:
+  tv:
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.jobs) }}
+    name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: Host facts
+        run: |
+          nproc; free -m | head -2; ls -l /dev/kvm /dev/dri 2>&1 | head -5
+          df -h / | tail -1
+      - name: Download firmware from LG
+        env:
+          FILEID: ${{ matrix.fileid }}
+        run: |
+          mkdir -p fw
+          curl -sS -L --retry 3 -o fw/fw.zip -D fw/headers.txt "https://gscs-b2c.lge.com/downloadFile?fileId=${FILEID}"
+          grep -i content-disposition fw/headers.txt || true
+          ls -l fw/fw.zip; sha256sum fw/fw.zip | tee fw/zip.sha256
+          df -h / | tail -1
+      - name: Beanjar in debian:trixie
+        env:
+          KERNEL: ${{ matrix.kernel }}
+          BOOT_MIN: ${{ inputs.boot_min }}
+        run: |
+          mkdir -p out && cp fw/zip.sha256 fw/headers.txt out/
+          sudo docker run --rm --privileged --device /dev/kvm -v "$PWD:/w" \
+            -e FW_ZIP=/w/fw/fw.zip -e KERNEL -e BOOT_MIN -e OUT=/w/out \
+            debian:trixie bash /w/run.sh
+          echo "---- results"; cat out/results.txt
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bj-${{ matrix.name }}-${{ matrix.kernel }}-${{ matrix.runner }}
+          path: out
+          if-no-files-found: warn
