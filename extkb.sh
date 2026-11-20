@@ -100,6 +100,9 @@ res ext_loaded "$(grep -c "chrome-extension://$EID" "$B/targets-start.json")"
 BASE=$(snap base)
 
 step extkb-control
+# let LG's first-use overlay come and go first (it starts about 5 min after boot)
+while [ "$(gsh "cut -d. -f1 /proc/uptime" | tail -1 | tr -dc 0-9)" -lt 380 ] 2>/dev/null; do sleep 10; done
+res uptime_before_tests "$(gsh "cut -d' ' -f1 /proc/uptime" | tail -1)"
 ready control
 mark
 res control_nav "$(timeout 60 python3 /w/extcdp.py nav "chrome://newtab" 'data:text/html,<body style="margin:0"><textarea id="t" style="width:900px;height:300px;font-size:30px;margin:40px"></textarea>' 2>&1 | tail -1)"
