@@ -4,8 +4,12 @@
 #   cdp.py version | list
 #   cdp.py gpu                      SystemInfo.getInfo (browser target)
 #   cdp.py nav URL SECONDS          navigate the first page; load times, requests, blocked-by-client count
-#   cdp.py eval EXPR                Runtime.evaluate in the first page (returnByValue)
-import json, sys, time, urllib.request
+#   cdp.py eval EXPR                Runtime.evaluate in the first page (returnByValue); env CDP_MATCH=substring
+#                                   picks the first page whose URL contains it
+#   cdp.py ae                       focused element (through shadow roots and same-origin iframes) of every page
+#                                   target that has focus (else of the visible ones), plus the test page's log
+#   cdp.py pages                    page targets (type, url)
+import json, os, sys, time, urllib.request
 import websocket
 
 BASE = "http://127.0.0.1:9222"
@@ -17,8 +21,9 @@ def get(path):
 
 
 def page():
+    m = os.environ.get("CDP_MATCH", "")
     for t in get("/json/list"):
-        if t.get("type") == "page":
+        if t.get("type") == "page" and m in t.get("url", ""):
             return t
     raise SystemExit(json.dumps({"error": "no page target"}))
 
@@ -55,6 +60,34 @@ class Conn:
 def evaluate(c, expr):
     r = c.call("Runtime.evaluate", {"expression": expr, "returnByValue": True, "awaitPromise": True}, 60)
     return r.get("result", {}).get("result", {}).get("value", r)
+
+
+AE = r"""(function(){function d(doc){var e=doc.activeElement;while(e&&e.shadowRoot&&e.shadowRoot.activeElement)e=e.shadowRoot.activeElement;
+if(e&&e.tagName=='IFRAME'){try{return 'iframe>'+d(e.contentDocument)}catch(x){return 'iframe(cross-origin)'}}
+if(!e)return 'null';var t=e.tagName.toLowerCase()+(e.id?'#'+e.id:'');
+var l=((e.getAttribute&&(e.getAttribute('aria-label')||e.getAttribute('title')))||e.innerText||e.value||'').toString().replace(/\s+/g,' ').slice(0,30);
+return t+(l?' "'+l+'"':'')}
+var L=window.LOG||[];var st=document.getElementById('st');
+return JSON.stringify({u:location.href.slice(0,60),f:document.hasFocus(),v:document.visibilityState,ae:d(document),sy:Math.round(scrollY),
+log:L.slice(-2).join('; '),scr:st&&st.dataset.scr})})()"""
+
+
+def ae():
+    out = []
+    for t in get("/json/list"):
+        if t.get("type") != "page" or not t.get("webSocketDebuggerUrl"):
+            continue
+        try:
+            c = Conn(t["webSocketDebuggerUrl"])
+            c.ws.settimeout(5)
+            r = c.call("Runtime.evaluate", {"expression": AE, "returnByValue": True}, 5)
+            v = json.loads(r["result"]["result"]["value"])
+        except Exception as e:
+            v = {"u": t.get("url", "")[:60], "err": type(e).__name__}
+        out.append(v)
+    foc = [v for v in out if v.get("f")]
+    vis = [v for v in out if v.get("v") == "visible" or v.get("err")]
+    print(json.dumps({"focused": foc} if foc else {"no_focused_page": vis[:3]}))
 
 
 def main():
@@ -97,6 +130,10 @@ def main():
                           "loadEventFired_s": first("Page.loadEventFired"),
                           "requests": reqs, "failed": len(failed), "blocked_by_client": len(blocked),
                           "blocked_sample": [b.get("errorText") for b in blocked[:3]], "page": info}))
+    elif cmd == "ae":
+        ae()
+    elif cmd == "pages":
+        print(json.dumps([t.get("url") for t in get("/json/list") if t.get("type") == "page"]))
     elif cmd == "eval":
         c = Conn(page()["webSocketDebuggerUrl"])
         print(json.dumps(evaluate(c, sys.argv[2])))

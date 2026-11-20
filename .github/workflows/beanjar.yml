@@ -7,13 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: 'JSON list of {name, fileid, kernel (x86-64|default), runner}'
+        description: 'JSON list of {name, fileid, kernel (x86-64|default), runner, optional ipk_url, ipk_sha256}'
         required: true
       boot_min:
         description: minutes to wait for the TV UI
         default: "25"
       mode:
-        description: smoke | bench | cpu | brave
+        description: smoke | bench | cpu | brave | dpad
         default: smoke
       ipk_url:
         description: brave mode, the IPK to test
@@ -33,22 +33,28 @@ jobs:
         include: ${{ fromJSON(inputs.jobs) }}
     name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.mode == 'brave' && 110 || 75 }}
+    timeout-minutes: ${{ inputs.mode == 'dpad' && 240 || inputs.mode == 'brave' && 110 || 75 }}
     steps:
       - uses: actions/checkout@v4
       - name: Host facts
         run: |
           nproc; free -m | head -2; ls -l /dev/kvm /dev/dri 2>&1 | head -5
           df -h / | tail -1
-      - name: Download and check the IPK (brave mode)
-        if: inputs.mode == 'brave'
+      - name: Download and check the IPK (brave and dpad modes)
+        if: inputs.mode == 'brave' || inputs.mode == 'dpad'
         env:
-          IPK_URL: ${{ inputs.ipk_url }}
-          IPK_SHA: ${{ inputs.ipk_sha256 }}
+          IPK_URL: ${{ matrix.ipk_url || inputs.ipk_url }}
+          IPK_SHA: ${{ matrix.ipk_sha256 || inputs.ipk_sha256 }}
         run: |
           curl -sS -L --retry 3 -o brave.ipk "$IPK_URL"
           ls -l brave.ipk
           echo "$IPK_SHA  brave.ipk" | sha256sum -c -
+      - name: Test clip for the D-pad page (dpad mode, MDN CC0 sample)
+        if: inputs.mode == 'dpad'
+        run: |
+          curl -sS -L --retry 3 -o web/clip.webm https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.webm || true
+          curl -sS -L --retry 3 -o web/clip.mp4 https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4 || true
+          ls -l web
       - name: Download firmware from LG
         env:
           FILEID: ${{ matrix.fileid }}
