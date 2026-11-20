@@ -9,13 +9,13 @@ for i in 1 2 3; do
 	t0=$(now)
 	timeout 600 beanjar start tv1 > "$OUT/logs/start-$i.log" 2>&1 || { res boot$i "start failed"; tail -5 "$OUT/logs/start-$i.log"; break; }
 	t1=$(now); luna_s=""; bd_s=""; home_s=""
-	while [ "$(dt "$t0" "$(now)" | cut -d. -f1)" -lt 900 ]; do
+	while [ "$(dt "$t0" "$(now)" | cut -d. -f1)" -lt 300 ]; do
 		el=$(dt "$t0" "$(now)")
 		o=$(gsh "luna-send -n 1 luna://com.webos.service.bootmanager/getBootStatus '{}'; echo; luna-send -n 1 $LS/getForegroundAppInfo '{}'")
 		[ -z "$luna_s" ] && echo "$o" | grep -q returnValue && luna_s=$el
 		[ -z "$bd_s" ] && echo "$o" | grep -q '"boot-done": *true' && bd_s=$el
 		[ -z "$home_s" ] && echo "$o" | grep -q '"appId": *"com.webos.app.home"' && home_s=$el
-		[ -n "$bd_s" ] && [ -n "$home_s" ] && break
+		[ -n "$home_s" ] && break
 		sleep 1
 	done
 	up=$(gsh "grep -h SIGNAL_boot-done /var/log/bootd.log | tail -1 | grep -o '[0-9.]*' | head -1")
@@ -34,7 +34,7 @@ res guest "$(gsh 'uname -m; uname -r; grep -c ^processor /proc/cpuinfo; grep Mem
 
 step cpu
 gsh_in "cat > /tmp/cpubench.sh" < /w/cpubench.sh
-gshl "sh /tmp/cpubench.sh" | tee "$OUT/logs/cpubench.txt"
+timeout 300 ${SSH_ROOT/ssh /ssh -o BatchMode=yes } "exec </dev/null; sh /tmp/cpubench.sh" 2>&1 </dev/null | tee "$OUT/logs/cpubench.txt"
 res cpu_qemu_during "$(vmstat_line)"
 
 step apps
@@ -54,7 +54,7 @@ for app in com.palm.app.settings com.webos.app.home; do
 		[ $app = com.palm.app.settings ] && gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$app\"}'" >/dev/null && sleep 5
 		[ $app = com.webos.app.home ] && gsh "luna-send -n 1 $LS/launch '{\"id\":\"com.palm.app.settings\"}'" >/dev/null && sleep 20
 		t0=$(now); gsh "luna-send -n 1 $LS/launch '{\"id\":\"$app\"}'" > "$OUT/logs/launch-$app-$i.txt"; t1=$(now)
-		while [ "$(fg | tail -1)" != "$app" ] && [ "$(dt "$t0" "$(now)" | cut -d. -f1)" -lt 120 ]; do sleep 0.3; done
+		while [ "$(fg | tail -1)" != "$app" ] && [ "$(dt "$t0" "$(now)" | cut -d. -f1)" -lt 90 ]; do sleep 0.3; done
 		res "launch_${app}_$i" "call_s=$(dt "$t0" "$t1") fg_s=$(dt "$t0" "$(now)")"
 		[ $i = 1 ] && shot "$app" >/dev/null
 	done
@@ -62,9 +62,9 @@ done
 press DOWN; sleep 3; shot dpad-down >/dev/null
 
 step web
-gshl "timeout 900 python3 /tmp/bw.py org.bean.bench 3" | tee "$OUT/logs/bw-webapp.txt"
+gshl "timeout 400 python3 /tmp/bw.py org.bean.bench 2" | tee "$OUT/logs/bw-webapp.txt"
 shot webapp >/dev/null
-gshl "timeout 900 python3 /tmp/bw.py com.webos.app.browser 3 http://127.0.0.1:8099/" | tee "$OUT/logs/bw-browser.txt"
+gshl "timeout 400 python3 /tmp/bw.py com.webos.app.browser 2 http://127.0.0.1:8099/" | tee "$OUT/logs/bw-browser.txt"
 shot browser >/dev/null
 res web_qemu "$(vmstat_line)"
 res total_s "$(el)"

@@ -47,7 +47,7 @@ for i in range(1, N + 1):
     r = luna("luna://com.webos.applicationManager/launch", body)
     t1 = time.time()
     tfg = None; tff = None; res = None
-    while time.time() - t0 < 180:
+    while time.time() - t0 < 150:
         if tfg is None and fg() == APP:
             tfg = time.time()
         for t, d in list(beacons):
