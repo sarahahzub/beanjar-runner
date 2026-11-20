@@ -157,7 +157,8 @@ def main():
                 out.append(v if isinstance(v, dict) else {"answer": False, "url": t.get("url", "")[:60], "r": str(v)[:80]})
             except Exception as e:
                 out.append({"answer": False, "url": t.get("url", "")[:60], "err": type(e).__name__})
-        print(json.dumps({"tabs": len(out), "unresponsive": sum(1 for o in out if o.get("answer") is False), "list": out}))
+        print(json.dumps({"tabs": len(out), "unresponsive": sum(1 for o in out if o.get("answer") is False),
+                          "discarded": sum(1 for o in out if o.get("discarded")), "list": out}))
 
 
 try:

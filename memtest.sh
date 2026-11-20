@@ -130,10 +130,10 @@ cflags() { # browser.flags lines for a config
 row() { printf '%s\n' "$*" | tr ' ' '\t' >> "$OUT/mem.tsv"; }
 field() { sed -n "s/.*\"$2\": *\([^,}]*\).*/\1/p" <<<"$1" | head -1 | tr -d '"'; }  # first "key": value in a JSON line
 pss_of() { sed -n 's/.*n=\([0-9]*\) pss=\([0-9]*\) swappss=\([0-9]*\).*memavail=\([0-9]*\) swapfree=\([0-9]*\).*/\2 \3 \4 \5/p' <<<"$1"; }
-echo "fw cfg round launch_s idle_pss idle_swap bbc_pss bbc_swap tabs_pss tabs_swap video_pss video_swap yt_pss yt_swap memavail_min swapfree_min oom_lines renderer_crash tabs_unresp brave_alive guest_hung bbc_load_ms bbc_blocked google_ms wiki_ms guardian_ms video yt" | tr ' ' '\t' > "$OUT/mem.tsv"
+echo "fw cfg round launch_s idle_pss idle_swap bbc_pss bbc_swap tabs_pss tabs_swap video_pss video_swap yt_pss yt_swap memavail_min swapfree_min oom_lines renderer_crash tabs1_unresp/disc tabs2_unresp/disc brave_alive guest_hung bbc_load_ms bbc_blocked bbc2_load_ms bbc2_blocked google_ms wiki_ms guardian_ms video yt" | tr ' ' '\t' > "$OUT/mem.tsv"
 
 runcfg() {
-	local C=$1 R=$2 tag="$1-r$2" t0 n0 ls j s idle bbc tabs vid yt l r1 r2 r3 tb vd ytv mins oom crash alive hung=N
+	local C=$1 R=$2 tag="$1-r$2" t0="" n0="" ls="" j="" s="" idle="" bbc="" bbc_m="" tabs="" vid="" yt="" l="" r1="" r2="" r3="" r4="" tb="" tb1="" vd="" ytv="" mins="" oom="" crash="" alive_b="" hung=N
 	step "mem $tag"
 	t0=$(date +%s)
 	alive || recover "before $tag"
@@ -141,7 +141,7 @@ runcfg() {
 	# run.sh with this config's JS heap (browser.flags cannot carry the two-word --js-flags value, see warm-up)
 	gsh "sed 's/--max-old-space-size=192 --optimize-for-size/--max-old-space-size=$(jsheap "$C") --optimize-for-size/' $RS.memtest-orig > $RS; grep -o 'max-old-space-size=[0-9]* --optimize-for-size' $RS" > "$M/$tag-runsh.txt"
 	# after a VM restart /tmp/$ID is gone; create it as the app's user, or run.sh cannot write there
-	gsh "[ -d $T ] || { mkdir -p $T && chown \$(stat -c %u:%g $APPDIR/data) $T && chmod 700 $T; }"
+	gsh "[ -d $T ] || { mkdir -p $T && chown \$(stat -c %u:%g $APPDIR/data/profile) $T && chmod 700 $T; }"
 	cflags "$C" > /tmp/bf; put /tmp/bf "$T/browser.flags"; gsh "chmod 644 $T/browser.flags"
 	python3 - "$M/LocalState.warm.json" /tmp/ls.json "$(lsmode "$C")" <<'EOF'
 import json, sys
@@ -156,11 +156,12 @@ ab["list_subscriptions"] = s
 json.dump(d, open(sys.argv[2], "w"), separators=(",", ":"))
 EOF
 	put /tmp/ls.json "$LSF"
-	gsh "grep -o '\"list_subscriptions\":{[^}]*' '$LSF' | grep -o 'https://[^\"]*' | wc -l; rm -rf $APPDIR/data/cache/* '$APPDIR/data/profile/Default/Code Cache' $APPDIR/data/profile/Default/GPUCache $APPDIR/data/profile/Default/Cache; sync; echo 3 > /proc/sys/vm/drop_caches; timeout 240 swapoff -a; swapon -a; : > /tmp/mt/samples; dmesg | wc -l" > "$M/$tag-prep.txt"
-	ls=$(head -1 "$M/$tag-prep.txt"); n0=$(tail -1 "$M/$tag-prep.txt" | tr -dc 0-9)
+	ls=$(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["brave"]["ad_block"]["list_subscriptions"]))' /tmp/ls.json)
+	gsh "[ \"\$(md5sum < '$LSF')\" = '$(md5sum < /tmp/ls.json)' ] && echo localstate-ok || echo localstate-DIFFERENT; rm -rf $APPDIR/data/cache/* '$APPDIR/data/profile/Default/Code Cache' $APPDIR/data/profile/Default/GPUCache $APPDIR/data/profile/Default/Cache; sync; echo 3 > /proc/sys/vm/drop_caches; cat /proc/swaps; : > /tmp/mt/samples; dmesg | wc -l" > "$M/$tag-prep.txt"
+	ls="$ls,$(head -1 "$M/$tag-prep.txt")"; n0=$(tail -1 "$M/$tag-prep.txt" | tr -dc 0-9)
 	l=$(launch_wait)
 	gsh "sh /tmp/mt/flags.sh" > "$M/$tag-flags.txt"; res "flags_$tag" "$(grep -E 'browser:|renderer' "$M/$tag-flags.txt" | head -2 | tr '\n' ' ' | cut -c1-500)"
-	if [ "$l" = none ]; then hung=$(alive && echo N || echo Y); fi
+	if [ "$l" = none ]; then hung=$(alive && echo N || echo Y); gsh "tail -c 3000 $T/media.log; tail -c 3000 $T/browser.log; ls -la $T" > "$M/$tag-nolaunch.txt"; fi
 	if [ "$l" != none ]; then
 		sleep 60; idle=$(snap); echo "idle $idle" >> "$M/$tag-mem.txt"; mshot "$tag-1idle"
 		bbc=$(mc "nav first https://www.bbc.com/ 150"); echo "$bbc" > "$M/$tag-bbc.json"
@@ -175,14 +176,16 @@ EOF
 		alive || hung=Y
 	fi
 	if [ "$l" != none ] && [ $hung = N ]; then
-		mc tabs 200 > "$M/$tag-tabs1.json"
+		tb1=$(mc tabs 200); echo "$tb1" > "$M/$tag-tabs1.json"
+		# BBC again in its own tab, ~4 min after start: Shields lists are loaded by now (blocked count)
+		r4=$(mc "nav $(field "$bbc" id) https://www.bbc.com/ 150"); echo "$r4" > "$M/$tag-bbc2.json"
 		j=$(field "$r3" id); [ -n "$j" ] || j=first
 		vd=$(mc "video $j $VIDEO 60" 300); echo "$vd" > "$M/$tag-video.json"
 		vid=$(snap); echo "video $vid" >> "$M/$tag-mem.txt"; mshot "$tag-4video"
 		alive || hung=Y
 	fi
 	if [ "$l" != none ] && [ $hung = N ]; then
-		ytv=$(mc "youtube $j $YT 60" 300); echo "$ytv" > "$M/$tag-youtube.json"
+		ytv=$(mc "youtube $j $YT 60" 160); echo "$ytv" > "$M/$tag-youtube.json"
 		yt=$(snap); echo "youtube $yt" >> "$M/$tag-mem.txt"; mshot "$tag-5youtube"
 		tb=$(mc tabs 200); echo "$tb" > "$M/$tag-tabs2.json"
 		alive || hung=Y
@@ -210,10 +213,10 @@ EOF
 	vsum=$(sed -n 's/.*"video": *{\([^}]*\)}.*/\1/p' <<<"$vd" | tr -d ' "' | tr ',' ';' | cut -c1-120)
 	ysum=$(sed -n 's/.*"video": *{\([^}]*\)}.*/\1/p' <<<"$ytv" | tr -d ' "' | tr ',' ';' | cut -c1-120)
 	row "${FWNAME:-fw}" "$C" "$R" "$l" "$ip" "$is" "$bp" "$bs" "$tp" "$tsw" "$vp" "$vs" "$yp" "$ys" "$ma" "$sf" "$oom" "$crash" \
-		"$(field "$tb" unresponsive)" "$alive_b" "$hung" "$(field "$bbc" loadEventEnd_ms)" "$(field "$bbc" blocked_by_client)" \
+		"$(field "$tb1" unresponsive)/$(field "$tb1" discarded)" "$(field "$tb" unresponsive)/$(field "$tb" discarded)" "$alive_b" "$hung" "$(field "$bbc" loadEventEnd_ms)" "$(field "$bbc" blocked_by_client)" \
+		"$(field "$r4" loadEventEnd_ms)" "$(field "$r4" blocked_by_client)" \
 		"$(field "$r1" loadEventEnd_ms)" "$(field "$r2" loadEventEnd_ms)" "$(field "$r3" loadEventEnd_ms)" "${vsum:-none}" "${ysum:-none}"
 	res "mem_$tag" "s=$(( $(date +%s) - t0 )) subs=$ls launch=$l idle=[$idle] bbc=[$bbc_m] tabs=[$tabs] video=[$vid] yt=[$yt] min=[$mins] oom=$oom hung=$hung"
-	idle=""; bbc_m=""; tabs=""; vid=""; yt=""; vd=""; ytv=""; bbc=""; r1=""; r2=""; r3=""; tb=""
 }
 
 ORDER1="A F C D B E"; ORDER2="E B D C F A"
