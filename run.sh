@@ -4,6 +4,7 @@
 #   KERNEL   x86-64 | arm64 | auto   (arm64 on an x86_64 host = full TCG; auto = Beanjar's own pick)
 #   BOOT_MIN minutes to wait for the TV UI (default 25)
 #   OUT      output directory (screenshots, logs, results.txt)
+#   MODE     smoke | bench | cpu | brave (brave.sh: install and test /w/brave.ipk)
 set -u
 export DEBIAN_FRONTEND=noninteractive VM_SYSTEMD=0
 OUT=${OUT:-/w/out}; BOOT_MIN=${BOOT_MIN:-25}; KERNEL=${KERNEL:-x86-64}; V=0.6.0
@@ -17,7 +18,7 @@ step() { echo "== $* (t=$(el)s)"; }
 step packages
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends wget ca-certificates git build-essential cmake liblzo2-dev \
-	libssl-dev zlib1g-dev unzip python3 python3-pil procps nodejs npm openssh-client >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
+	libssl-dev zlib1g-dev unzip python3 python3-pil python3-websocket binutils procps nodejs npm openssh-client >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
 arch=$(dpkg --print-architecture)
 url=https://github.com/webosbrew/beanjar/releases/download/v$V
 mkdir -p /tmp/debs && cd /tmp/debs
@@ -119,7 +120,9 @@ cat "$OUT/logs/guest-info.txt" | head -8 | sed 's/^/  guest: /'
 res qemu_usage "$(vmstat_line)"
 shot booted
 
-if [ -n "$booted" ]; then
+if [ -n "$booted" ] && [ "${MODE:-smoke}" = brave ]; then
+	. /w/brave.sh
+elif [ -n "$booted" ]; then
 	step smoke
 	(timeout 2400 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15; res vnc_running "$(pgrep -c beanjar-vnc)"
 	sleep 30; shot booted-plus30; res fg_plus30 "$(fg | tail -1)"
