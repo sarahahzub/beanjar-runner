@@ -109,10 +109,7 @@ fresh() { # close the browser and start it again: clean UI state for each sectio
 		close >/dev/null; sleep 10; p=$(procs); [ -n "$p" ] && gsh "kill -9 $p" >/dev/null; sleep 3
 		fwd; launch >/dev/null; cdp_wait 200 || echo "   fresh: still no CDP" >> "$FL"
 	fi
-	sleep 10; fwd() { # the guest's sshd sometimes closes the long-lived forwards ("closed by remote host"): restart them
-	pgrep -f 'ssh .*-L 9222' >/dev/null || { echo "   fwd: restarting -L 9222" >> "$FL"; (${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L 9222:127.0.0.1:9222 } >> "$B/ssh-L.log" 2>&1 &); sleep 3; }
-	pgrep -f 'ssh .*-R 8000' >/dev/null || { echo "   fwd: restarting -R 8000" >> "$FL"; (${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -R 8000:127.0.0.1:8000 } >> "$B/ssh-R.log" 2>&1 &); sleep 3; }; }
-	echo "   fresh: tab $TID $(cdp pages)" >> "$FL"; }
+	sleep 10; echo "   fresh: $(cdp pages)" >> "$FL"; }
 front() { [ "$(fg | tail -1)" = "$ID" ] && timeout 15 python3 /w/cdp.py list >/dev/null 2>&1 && return 0; fresh; }
 toolbar() { goto "y0>=38 and y1<=90" UP 4; }  # UP until the focus ring is in the toolbar row
 POS=$B/toolbar-positions.txt
