@@ -24,7 +24,7 @@ jobs:
         include: ${{ fromJSON(inputs.jobs) }}
     name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 50
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - name: Host facts

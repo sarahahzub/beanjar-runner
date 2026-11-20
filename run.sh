@@ -56,6 +56,7 @@ beanjar info tv1 --json > "$OUT/logs/info-created.json" 2>&1
 res platform "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("platform") or d.get("target") or "?")' "$OUT/logs/info-created.json" 2>/dev/null)"
 if [ "$KERNEL" != auto ]; then beanjar settings tv1 set guest_kernel=$KERNEL 2>&1 | tail -3; fi
 beanjar settings tv1 > "$OUT/logs/settings.txt" 2>&1
+res guest_kernel_setting "$(grep "^guest_kernel" "$OUT/logs/settings.txt")"
 VMDIR=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["dir"])' "$OUT/logs/info-created.json")
 
 # --- helpers ---
@@ -83,7 +84,8 @@ shot() { # shot NAME : beanjar screenshot, else QMP screendump
 	qmp "{\"execute\":\"screendump\",\"arguments\":{\"filename\":\"/tmp/s.ppm\",\"format\":\"ppm\"}}" >>"$OUT/logs/screenshot.log" 2>&1
 	python3 -c 'import sys;from PIL import Image;Image.open("/tmp/s.ppm").save(sys.argv[1])' "$f" 2>>"$OUT/logs/screenshot.log" && echo "shot(qmp) $f"
 }
-fg() { gsh "luna-send -n 1 -f luna://com.webos.applicationManager/getForegroundAppInfo '{}' 2>/dev/null | grep -o '\"appId\": *\"[^\"]*\"' | cut -d'\"' -f4"; }
+fg() { gsh "luna-send -n 1 luna://com.webos.applicationManager/getForegroundAppInfo '{}' 2>&1" > /tmp/fg.raw; echo "$(date +%T) $(tr -d '\n' < /tmp/fg.raw | cut -c1-300)" >> "$OUT/logs/fg-raw.log"; grep -o '"appId": *"[^"]*"' /tmp/fg.raw | head -1 | cut -d'"' -f4; }
+bootdone() { gsh "grep -h -E 'SIGNAL_boot-done|POWERSTATUS' /var/log/bootd.log 2>/dev/null | tail -3 | tr '\n' ' '"; }
 press() { timeout 30 beanjar remote press tv1 "$@" >>"$OUT/logs/remote.log" 2>&1 || echo "remote press $* failed (rc $?)" | tee -a "$OUT/logs/remote.log"; }
 vmstat_line() { ps -o %cpu=,rss= -p "$(pgrep -d, -f 'qemu-system-' || echo 1)" 2>/dev/null | awk '{c+=$1; r+=$2} END {printf "qemu_cpu=%s%% qemu_rss_mb=%d", c, r/1024}'; }
 
@@ -99,23 +101,25 @@ step boot-wait
 TS=$(date +%s); booted=""; last_shot=0; n=0
 while [ $(( $(date +%s) - TS )) -lt $(( BOOT_MIN * 60 )) ]; do
 	sleep 20; n=$((n+1))
-	a=$(fg | tail -1)
-	echo "t=$(( $(date +%s) - TS ))s fg=[$a] $(vmstat_line) guest[$(gsh 'echo up=$(cut -d" " -f1 /proc/uptime) procs=$(ls -d /proc/[0-9]* | wc -l) $(systemctl is-system-running 2>/dev/null)' | tail -1 | cut -c1-120)]"
-	if [ $(( $(date +%s) - last_shot )) -ge 120 ]; then shot boot >/dev/null; last_shot=$(date +%s); fi
+	bd=$(bootdone | tail -1); a=$(fg | tail -1)
+	echo "t=$(( $(date +%s) - TS ))s fg=[$a] bootd[$(echo "$bd" | cut -c1-140)] $(vmstat_line) guest[$(gsh 'echo up=$(cut -d" " -f1 /proc/uptime) procs=$(ls -d /proc/[0-9]* | wc -l) $(systemctl is-system-running 2>/dev/null)' | tail -1 | cut -c1-120)]"
+	if [ $(( $(date +%s) - last_shot )) -ge 180 ]; then shot boot >/dev/null; last_shot=$(date +%s); fi
+	case "$bd" in *SIGNAL_boot-done*) booted="boot-done ${a:-fg?}"; break;; esac
 	case "$a" in com.*|org.*|*.app.*) booted="$a"; break;; esac
 	if ! pgrep -f qemu-system >/dev/null; then echo "QEMU is gone"; break; fi
 done
 BOOT_S=$(( $(date +%s) - TS ))
-res boot_wait_s $BOOT_S; res boot_fg_app "${booted:-none}"
+res boot_wait_s $BOOT_S; res boot_detect "${booted:-none}"; res bootd "$(bootdone | tail -1)"
 gsh 'cat /etc/starfish-release 2>/dev/null; cat /proc/uptime; cat /proc/loadavg; grep -E "MemTotal|MemAvailable" /proc/meminfo; uname -a' > "$OUT/logs/guest-info.txt"
 cat "$OUT/logs/guest-info.txt" | head -8 | sed 's/^/  guest: /'
 res qemu_usage "$(vmstat_line)"
 shot booted
 
 if [ -n "$booted" ]; then
-	sleep 30; shot booted-plus30
 	step smoke
-	timeout 60 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 & sleep 10
+	(timeout 2400 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15; res vnc_running "$(pgrep -c beanjar-vnc)"
+	sleep 30; shot booted-plus30; res fg_plus30 "$(fg | tail -1)"
+	timeout 90 beanjar screensaver stop tv1 --json > "$OUT/logs/screensaver-stop.json" 2>&1; res screensaver_stop_rc $?
 	press HOME; sleep 15; shot home; res after_home "$(fg | tail -1)"
 	press RIGHT; sleep 4; press RIGHT; sleep 8; shot right2
 	press LEFT; sleep 8; shot left1
