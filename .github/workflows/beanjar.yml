@@ -13,7 +13,7 @@ on:
         description: minutes to wait for the TV UI
         default: "25"
       mode:
-        description: smoke | bench | cpu | brave
+        description: smoke | bench | cpu | brave | memtest
         default: smoke
       ipk_url:
         description: brave mode, the IPK to test
@@ -33,7 +33,7 @@ jobs:
         include: ${{ fromJSON(inputs.jobs) }}
     name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.mode == 'brave' && 110 || 75 }}
+    timeout-minutes: ${{ inputs.mode == 'memtest' && 300 || inputs.mode == 'brave' && 110 || 75 }}
     steps:
       - uses: actions/checkout@v4
       - name: Host facts
@@ -41,7 +41,7 @@ jobs:
           nproc; free -m | head -2; ls -l /dev/kvm /dev/dri 2>&1 | head -5
           df -h / | tail -1
       - name: Download and check the IPK (brave mode)
-        if: inputs.mode == 'brave'
+        if: inputs.mode == 'brave' || inputs.mode == 'memtest'
         env:
           IPK_URL: ${{ inputs.ipk_url }}
           IPK_SHA: ${{ inputs.ipk_sha256 }}
@@ -63,10 +63,11 @@ jobs:
           KERNEL: ${{ matrix.kernel }}
           BOOT_MIN: ${{ inputs.boot_min }}
           MODE: ${{ inputs.mode }}
+          FWNAME: ${{ matrix.name }}
         run: |
           mkdir -p out && cp fw/zip.sha256 fw/headers.txt out/
           sudo docker run --rm --privileged --device /dev/kvm -v "$PWD:/w" \
-            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e OUT=/w/out \
+            -e FW_ZIP=/w/fw/fw.zip -e KERNEL="$KERNEL" -e BOOT_MIN="$BOOT_MIN" -e MODE="$MODE" -e FWNAME="$FWNAME" -e OUT=/w/out \
             debian:trixie bash /w/run.sh
           echo "---- results"; cat out/results.txt
       - name: Readable outputs
