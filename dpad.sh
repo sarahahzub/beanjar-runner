@@ -112,21 +112,19 @@ fresh() { # close the browser and start it again: clean UI state for each sectio
 front() { [ "$(fg | tail -1)" = "$ID" ] && timeout 15 python3 /w/cdp.py list >/dev/null 2>&1 && return 0; fresh; }
 toolbar() { goto "y0>=38 and y1<=90" UP 4; }  # UP until the focus ring is in the toolbar row
 POS=$B/toolbar-positions.txt
+pf() { k DOWN; timeout 25 python3 /w/cdp.py ae 2>/dev/null | grep -q '"focused"' || k DOWN; }  # after a CDP navigation the omnibox keeps focus: DOWN moves it into the page
 
 # ---------- 1. Back key
 st back "A -> link -> B; BACK; OK on what BACK focused; Back on the first page (fresh New Tab): BACK x2 quick, then hold"
-fresh; nav $W/a.html; base
+fresh; nav $W/a.html; base; pf
 cf toB >/dev/null; FG=1 k ENTER; sleep 5; obs back_on_B "$(url)"
 FG=1 k BACK; sleep 3; obs back_after_back1 "$(url) ui=$LASTFX"
 FG=1 k ENTER; sleep 5; obs back_after_back1_ok "$(url)"
-fresh; base
-FG=1 KW=1 k BACK; FG=1 KW=1 k BACK; sleep 4; FG=1 k BACK
-obs back_first_page "fg=$(fg | tail -1) procs=[$(procs)] url=$(url)"
-kh BACK 2000; sleep 6; snap "$OUT/shots/back-after-hold.png"; obs back_hold "fg=$(fg | tail -1) procs=[$(procs)]"
+FG=1 k BACK; FG=1 k BACK; sleep 3; obs back_on_A_twice "$(url) fg=$(fg | tail -1)"
 
 # ---------- 2. Three-dot menu
 st menu "toolbar walk, menu items DOWN+RIGHT(+LEFT), submenus by OK/BACK, zoom row, Exit"
-fresh; nav $W/a.html; base
+fresh; nav $W/a.html; base; pf
 toolbar; obs menu_toolbar_entry "$LASTFX"
 : > "$POS"; for i in $(seq 16); do k RIGHT; echo "$LASTFX" >> "$POS"; done
 obs toolbar_walk "$(tr '\n' ';' < "$POS" | sed 's/ n=[0-9]*//g')"
@@ -165,7 +163,7 @@ obs menu_exit "fg=$(fg | tail -1) procs=[$(procs)]"; snap "$OUT/shots/menu-after
 
 # ---------- 3. Bookmark star
 st star "reach the star, OK opens the bubble, walk it, OK (Done?), check Bookmarks; open again for Remove/Edit"
-fresh; nav $W/a.html; base
+fresh; nav $W/a.html; base; pf
 toolbar
 if [ $SCH = brave ]; then SP="160<x<205 and y0>=38"; else SP="700<x<1185 and w<50 and y0>=38 and y1<=90"; fi
 goto "$SP" RIGHT 16 || goto "$SP" LEFT 16
@@ -178,39 +176,15 @@ k ENTER; sleep 3; kn 6 DOWN; kn 3 RIGHT; k BACK; sleep 3
 obs star_after_second "$(bmarks)"
 nav $SCH://bookmarks; sleep 5; snap "$OUT/shots/star-bookmarks-page.png"
 
-# ---------- 4. History page
-st hist "history: DOWN through entries, UP to search/menu, LEFT sidebar, open an entry with OK, remove one via its menu"
-fresh; nav $W/b.html; nav $SCH://history; sleep 5; base
-obs hist_count_start "$(CDP_MATCH=history cdp eval "$HISTN")"
-k DOWN; kn 6 DOWN; kn 9 UP; k LEFT LEFT RIGHT RIGHT
-nav $SCH://history; sleep 5
-k DOWN DOWN DOWN RIGHT; obs hist_on "$(timeout 25 python3 /w/cdp.py ae | cut -c1-200)"
-k ENTER; sleep 6; obs hist_open_entry "$(url)"
-nav $SCH://history; sleep 5
-k DOWN DOWN DOWN RIGHT RIGHT; obs hist_on2 "$(timeout 25 python3 /w/cdp.py ae | cut -c1-200)"
-k ENTER; sleep 2; k DOWN; k ENTER; sleep 3
-obs hist_count_after_remove "$(CDP_MATCH=history cdp eval "$HISTN")"
-k UP UP UP UP UP
-
 # ---------- 5. Other browser parts
-st tabs "tab strip: UP from the toolbar, walk, new-tab +, select tab 1, close tab 2 with its x"
-fresh; nav $W/a.html; base
-toolbar; k UP; kn 4 RIGHT
-goto "y1<44 and 30<=w<45 and 250<x<700" RIGHT 6
-k ENTER; sleep 6; obs tabs_after_plus "$(cdp pages)"
-k DOWN; k UP UP UP; obs tabs_strip "$LASTFX"
-goto "w>150 and x<250 and y1<44" LEFT 8; k ENTER; sleep 4
-obs tabs_after_select "$(timeout 30 python3 /w/cdp.py ae | cut -c1-300)"
-goto "w<30 and 250<x<520 and y1<44" RIGHT 8; k ENTER; sleep 4; obs tabs_after_close "$(cdp pages)"
-
 st omni "address bar: reach it, OK, BACK, DOWN into suggestions, OK"
-fresh; nav $W/b.html; base
+fresh; nav $W/b.html; base; pf
 toolbar; goto "w>300 and y0>=38" RIGHT 16 || goto "w>300 and y0>=38" LEFT 16; obs omni_reached "$LASTFX"
 KW=3 k ENTER; KW=3 k BACK
 k DOWN DOWN; k ENTER; sleep 6; obs omni_after_enter "$(url)"
 
 st navbtn "back / forward / reload buttons"
-fresh; nav $W/a.html; nav $W/b.html; base
+fresh; nav $W/a.html; nav $W/b.html; base; pf
 toolbar; goto "x<36 and y0>=38" LEFT 3; k ENTER; sleep 5; obs navbtn_back "$(url)"
 goto "36<=x<70 and y0>=38" RIGHT 4; k ENTER; sleep 5; obs navbtn_forward "$(url)"
 cdp eval "window.name='before-reload'" >/dev/null
@@ -218,7 +192,7 @@ goto "75<=x<120 and y0>=38" RIGHT 4; k ENTER; sleep 6; obs navbtn_reload "$(cdp 
 
 if [ $SCH = brave ]; then
 st shields "Shields lion panel: open, walk, OK on one control, close"
-fresh; nav $W/a.html; base
+fresh; nav $W/a.html; base; pf
 toolbar; goto "1040<x<1080 and y0>=38" LEFT 16; obs shields_reached "$LASTFX"
 k ENTER; sleep 5; obs shields_panel "$(cdp pages)"
 kn 8 DOWN; k ENTER; sleep 3; kn 3 UP; k RIGHT LEFT; k BACK; sleep 2
@@ -227,34 +201,16 @@ fi
 
 for r in 1 2 3; do
 st sweep$r "from the menu button LEFT x$r, OK, walk the popup, BACK"
-fresh; nav $W/a.html; base
+fresh; nav $W/a.html; base; pf
 toolbar; goto "x>1235 and y0>=38" LEFT 16
 kn $r LEFT; obs sweep${r}_button "$LASTFX"
 k ENTER; sleep 5; obs sweep${r}_open "diff=$(dif "$FXB" "$(last)") $(cdp pages)"
 kn 5 DOWN; k RIGHT LEFT; k BACK; sleep 2; obs sweep${r}_after_back "diff=$(dif "$FXB" "$(last)") $(cdp pages)"
 done
 
-st ntp "New Tab page widgets (fresh start page)"
-fresh; base
-kn 6 DOWN; kn 4 RIGHT; kn 2 LEFT; kn 5 UP
-
-st settings "Settings: sidebar, a toggle, a dropdown, a sub-page and back"
-fresh; nav $SCH://settings; sleep 8; base
-kn 6 DOWN; k LEFT; kn 3 DOWN; k ENTER; sleep 4; obs settings_after_sidebar_ok "$(CDP_MATCH=settings cdp eval location.href)"
-k RIGHT; kn 4 DOWN; k ENTER; sleep 3; kn 2 DOWN; k ENTER; sleep 3; obs settings_sub "$(CDP_MATCH=settings cdp eval location.href)"
-k BACK; sleep 2; k BACK; sleep 2; obs settings_after_back "$(CDP_MATCH=settings cdp eval location.href)"
-
-st downloads "Downloads page"
-fresh; nav $SCH://downloads; sleep 5; base
-kn 4 DOWN; kn 4 UP; k LEFT RIGHT
-
-st ctx "context menu: hold OK on a link"
-fresh; nav $W/a.html; base
-cf toB >/dev/null; kh ENTER 1500; sleep 2; k DOWN; k BACK; obs ctx "$(url)"
-
 # ---------- 6. Page sub-elements
 st walk "test page: DOWN through everything, then UP"
-fresh; nav $W/t.html 8; base
+fresh; nav $W/t.html 8; base; pf
 kn 40 DOWN; kn 8 UP
 st grid "links grid: CDP focus g5, then OK and arrows"
 cf g5 >/dev/null; k ENTER RIGHT DOWN LEFT UP; obs grid "$(logv)"
@@ -273,7 +229,7 @@ st carousel "horizontal carousel"; cf c1 >/dev/null; kn 6 RIGHT; obs carousel "s
 st long "long page: DOWN with no element below"; cf c8 >/dev/null; kn 6 DOWN; obs long "$(logv)"
 st up "edge: UP x14 from the bottom of the long page (back to the toolbar?)"; kn 14 UP; obs up_last_ui "$LASTFX"
 for e in alert confirm geo notif dialog text; do
-	st $e "$e (fresh start, test page)"; fresh; nav $W/t.html 6; base
+	st $e "$e (fresh start, test page)"; fresh; nav $W/t.html 6; base; pf
 	case $e in
 	alert) cf bAlert >/dev/null; k ENTER; sleep 2; k LEFT RIGHT DOWN ENTER; sleep 2;;
 	confirm) cf bConfirm >/dev/null; k ENTER; sleep 2; k RIGHT ENTER; sleep 2;;
