@@ -91,6 +91,7 @@ bootdone() { gsh "grep -h -E 'SIGNAL_boot-done|POWERSTATUS' /var/log/bootd.log 2
 press() { timeout 30 beanjar remote press tv1 "$@" >>"$OUT/logs/remote.log" 2>&1 || echo "remote press $* failed (rc $?)" | tee -a "$OUT/logs/remote.log"; }
 vmstat_line() { ps -o %cpu=,rss= -p "$(pgrep -d, -f 'qemu-system-' || echo 1)" 2>/dev/null | awk '{c+=$1; r+=$2} END {printf "qemu_cpu=%s%% qemu_rss_mb=%d", c, r/1024}'; }
 
+[ "${MODE:-}" = cpu ] && { MODE=bench; KERNEL_ONLY_CPU=1; }
 if [ "${MODE:-smoke}" = bench ]; then . /w/bench.sh; chmod -R a+rwX "$OUT" 2>/dev/null; exit 0; fi
 step start
 t=$(date +%s)

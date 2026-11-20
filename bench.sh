@@ -3,8 +3,10 @@
 now() { date +%s.%N; }
 dt() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.1f", b-a}'; }
 LS=luna://com.webos.applicationManager
+gsh true >/dev/null  # sets SSH_ROOT in this shell
+NB=3; [ "${KERNEL_ONLY_CPU:-}" ] && NB=1
 
-for i in 1 2 3; do
+for i in $(seq 1 $NB); do
 	step "boot $i"
 	t0=$(now)
 	timeout 600 beanjar start tv1 > "$OUT/logs/start-$i.log" 2>&1 || { res boot$i "start failed"; tail -5 "$OUT/logs/start-$i.log"; break; }
@@ -21,7 +23,7 @@ for i in 1 2 3; do
 	up=$(gsh "grep -h SIGNAL_boot-done /var/log/bootd.log | tail -1 | grep -o '[0-9.]*' | head -1")
 	res boot$i "start_cmd_s=$(dt "$t0" "$t1") luna_up_s=${luna_s:-none} boot_done_s=${bd_s:-none} home_fg_s=${home_s:-none} bootd_uptime=${up:-?} $(vmstat_line)"
 	shot "boot$i-home" >/dev/null
-	if [ $i -lt 3 ]; then
+	if [ $i -lt $NB ]; then
 		t=$(now); timeout 240 beanjar stop tv1 --force > "$OUT/logs/stop-$i.log" 2>&1; res stop${i} "rc=$? s=$(dt "$t" "$(now)")"
 	fi
 done
@@ -34,8 +36,9 @@ res guest "$(gsh 'uname -m; uname -r; grep -c ^processor /proc/cpuinfo; grep Mem
 
 step cpu
 gsh_in "cat > /tmp/cpubench.sh" < /w/cpubench.sh
-timeout 300 ${SSH_ROOT/ssh /ssh -o BatchMode=yes } "exec </dev/null; sh /tmp/cpubench.sh" 2>&1 </dev/null | tee "$OUT/logs/cpubench.txt"
+gshl "sh /tmp/cpubench.sh" | tee "$OUT/logs/cpubench.txt"
 res cpu_qemu_during "$(vmstat_line)"
+[ "${KERNEL_ONLY_CPU:-}" ] && return 0
 
 step apps
 mkdir -p /tmp/ipk/app && cd /tmp/ipk/app
