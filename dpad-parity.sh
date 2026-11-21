@@ -10,6 +10,32 @@ blog() { gsh "cat $T/browser.log 2>/dev/null" > "$B/browser-$1.log"; grep -c . "
 mlog() { gsh "tail -c 20000 $T/media.log 2>/dev/null" > "$B/media-$1.log"; }
 ringrow() { python3 -c "import re,sys;m=re.match(r'x=(\d+) w=(\d+) y=(\d+)-(\d+)',sys.argv[1]);print('none' if not m else ('toolbar' if int(m.group(3))>=38 and int(m.group(4))<=90 else ('tabs' if int(m.group(4))<38 else ('bar' if int(m.group(4))<=175 else 'page'))))" "$LASTFX" 2>/dev/null || echo none; }
 
+# ---------- owner items (1.99.5858): bookmark-bar import line, NTP background, Memory Saver; PSS photo vs solid
+pss() { gsh "t=0; w=0; n=0; for p in /proc/[0-9]*; do tr '\\0' ' ' < \$p/cmdline 2>/dev/null | grep -q '[c]om.brave.browser/browser/chrome' || continue; k=\$(awk '/^Pss:/{s+=\$2} END{print s+0}' \$p/smaps_rollup 2>/dev/null); q=\$(awk '/^SwapPss:/{s+=\$2} END{print s+0}' \$p/smaps_rollup 2>/dev/null); t=\$((t+k)); w=\$((w+q)); n=\$((n+1)); done; echo procs=\$n pss_kb=\$t swappss_kb=\$w \$(grep MemAvailable /proc/meminfo | tr -s ' ')" | tail -1; }
+PREF=$APPDIR/data/profile/Default/Preferences; LST="$APPDIR/data/profile/Local State"
+st owner "owner items: import line, NTP background, Memory Saver (prefs, screenshots, settings page)"
+fresh; sleep 5; snap "$OUT/shots/owner-ntp.png"
+obs owner_prefs "bg=$(gsh "grep -o '\"show_background_image\":[a-z]*' $PREF" | tr '\n' ' ') ms=$(gsh "grep -o '\"high_efficiency_mode\":{[^}]*}' '$LST'" | tr '\n' ' ') marker=$(gsh "ls $APPDIR/data/profile/.tv-defaults-1 2>&1" | tail -1)"
+nav $SCH://settings/performance 8; sleep 4; snap "$OUT/shots/owner-settings-performance.png"
+obs owner_memsaver "$(cdp eval "(function(){const out=[];const w=(r)=>{for(const e of r.querySelectorAll('*')){if(e.shadowRoot)w(e.shadowRoot);if(e.tagName==='CR-TOGGLE'||e.tagName==='CR-RADIO-BUTTON'||e.tagName==='CONTROLLED-RADIO-BUTTON'){const l=(e.getAttribute('aria-label')||e.getAttribute('label')||(e.closest&&e.parentNode&&e.parentNode.host&&e.parentNode.host.getAttribute('label'))||'').slice(0,40);out.push(e.tagName.toLowerCase()+':'+l+'='+(e.checked===true||e.hasAttribute('checked')))}}};w(document);return out.slice(0,12).join(' | ')})()")"
+memrun() { # memrun LABEL: idle on the NTP 60 s, then 3 more tabs (4 in all) and 30 s; PSS of all chrome processes
+	fresh; sleep 60; local i; i=$(pss); snap "$OUT/shots/mem-$1-idle.png"
+	timeout 150 python3 /w/memcdp.py newtab https://www.google.com/ 120 > "$B/mem-$1-t1.json" 2>&1
+	timeout 150 python3 /w/memcdp.py newtab https://en.wikipedia.org/wiki/Television 120 > "$B/mem-$1-t2.json" 2>&1
+	timeout 180 python3 /w/memcdp.py newtab https://www.theguardian.com/international 150 > "$B/mem-$1-t3.json" 2>&1
+	sleep 30; local t; t=$(pss); obs mem_$1 "idle=[$i] 4tabs=[$t]"; }
+st mem "PSS: idle and 4 tabs, NTP background as shipped, then the other setting (5858) "
+if [ "$VER" = 1.99.5858 ]; then
+	memrun solid
+	close >/dev/null; sleep 10; gsh "sed -i 's/\"show_background_image\":false/\"show_background_image\":true/' $PREF"
+	memrun photo
+	close >/dev/null; sleep 10; gsh "sed -i 's/\"show_background_image\":true/\"show_background_image\":false/' $PREF"
+	obs mem_restored "$(gsh "grep -o '\"show_background_image\":[a-z]*' $PREF")"
+else
+	memrun photo
+fi
+flags
+
 # ---------- 0. --no-sandbox bar (5856: Hide; from the 3rd showing also Don't show again)
 st bar "--no-sandbox bar: fresh start (3rd showing), toolbar, DOWN, DOWN, OK on the lower button"
 fresh; base; snap "$OUT/shots/bar-start.png"
