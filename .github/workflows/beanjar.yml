@@ -78,7 +78,10 @@ jobs:
           echo "---- results"; cat out/results.txt
       - name: Readable outputs
         if: always()
-        run: sudo chmod -R a+rwX out || true
+        run: |
+          sudo chmod -R a+rwX out || true
+          # LG crash report names contain ':' and '|', which upload-artifact refuses (run 44864188497 lost its artifact)
+          find out -depth -name '*[:"<>|*?]*' -execdir sh -c 'mv "$1" "$(printf %s "$1" | tr ":\"<>|*?" "_______")"' _ {} \; || true
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4

@@ -16,14 +16,15 @@ PREF=$APPDIR/data/profile/Default/Preferences; LST="$APPDIR/data/profile/Local S
 st owner "owner items: import line, NTP background, Memory Saver (prefs, screenshots, settings page)"
 fresh; sleep 5; snap "$OUT/shots/owner-ntp.png"
 obs owner_prefs "bg=$(gsh "grep -o '\"show_background_image\":[a-z]*' $PREF" | tr '\n' ' ') ms=$(gsh "grep -o '\"high_efficiency_mode\":{[^}]*}' '$LST'" | tr '\n' ' ') marker=$(gsh "ls $APPDIR/data/profile/.tv-defaults-1 2>&1" | tail -1)"
-nav $SCH://settings/performance 8; sleep 4; snap "$OUT/shots/owner-settings-performance.png"
-obs owner_memsaver "$(cdp eval "(function(){const out=[];const w=(r)=>{for(const e of r.querySelectorAll('*')){if(e.shadowRoot)w(e.shadowRoot);if(e.tagName==='CR-TOGGLE'||e.tagName==='CR-RADIO-BUTTON'||e.tagName==='CONTROLLED-RADIO-BUTTON'){const l=(e.getAttribute('aria-label')||e.getAttribute('label')||(e.closest&&e.parentNode&&e.parentNode.host&&e.parentNode.host.getAttribute('label'))||'').slice(0,40);out.push(e.tagName.toLowerCase()+':'+l+'='+(e.checked===true||e.hasAttribute('checked')))}}};w(document);return out.slice(0,12).join(' | ')})()")"
+nav $SCH://settings/performance 8; sleep 6; snap "$OUT/shots/owner-settings-performance.png"
+obs owner_memsaver "$(CDP_MATCH=settings cdp eval "(function(){const out=[];const w=(r)=>{for(const e of r.querySelectorAll('*')){if(e.shadowRoot)w(e.shadowRoot);if(e.tagName==='CR-TOGGLE'||e.tagName==='CR-RADIO-BUTTON'||e.tagName==='CONTROLLED-RADIO-BUTTON'){const l=(e.getAttribute('aria-label')||e.getAttribute('label')||(e.closest&&e.parentNode&&e.parentNode.host&&e.parentNode.host.getAttribute('label'))||'').slice(0,40);out.push(e.tagName.toLowerCase()+':'+l+'='+(e.checked===true||e.hasAttribute('checked')))}}};w(document);return out.slice(0,12).join(' | ')})()")"
 memrun() { # memrun LABEL: idle on the NTP 60 s, then 3 more tabs (4 in all) and 30 s; PSS of all chrome processes
-	fresh; sleep 60; local i; i=$(pss); snap "$OUT/shots/mem-$1-idle.png"
-	timeout 150 python3 /w/memcdp.py newtab https://www.google.com/ 120 > "$B/mem-$1-t1.json" 2>&1
-	timeout 150 python3 /w/memcdp.py newtab https://en.wikipedia.org/wiki/Television 120 > "$B/mem-$1-t2.json" 2>&1
-	timeout 180 python3 /w/memcdp.py newtab https://www.theguardian.com/international 150 > "$B/mem-$1-t3.json" 2>&1
-	sleep 30; local t; t=$(pss); obs mem_$1 "idle=[$i] 4tabs=[$t]"; }
+	fresh; sleep 60; local i t u n; i=$(pss); [ -n "$i" ] || { sleep 5; i=$(pss); }; snap "$OUT/shots/mem-$1-idle.png"
+	n=1; for u in https://www.google.com/ https://en.wikipedia.org/wiki/Television https://www.theguardian.com/international; do
+		timeout 200 python3 /w/memcdp.py newtab "$u" 150 > "$B/mem-$1-t$n.json" 2>&1
+		obs mem_$1_tab$n "$(cut -c1-160 "$B/mem-$1-t$n.json" | tail -1) | $(pss)"; n=$((n+1)); done
+	sleep 30; t=$(pss); [ -n "$t" ] || { sleep 5; t=$(pss); }; snap "$OUT/shots/mem-$1-4tabs.png"
+	obs mem_$1 "idle=[$i] 4tabs=[$t] fg=$(fg | tail -1)"; mlog mem-$1; obs mem_$1_media "$(grep -E 'chrome exited|NOHW|low memory|oom' "$B/media-mem-$1.log" | tail -3 | tr '\n' ';')"; }
 st mem "PSS: idle and 4 tabs, NTP background as shipped, then the other setting (5858) "
 if [ "$VER" = 1.99.5858 ]; then
 	memrun solid
@@ -120,7 +121,7 @@ for i in 1 2 3 4; do k UP; obs ntp_up$i "$(ringrow) $LASTFX"; done
 
 # ---------- 8. Shields panel
 st shields "Shields: open from the toolbar, DOWN x6 with the panel's focused element, BACK"
-fresh; nav $W/a.html; base; pf; toolbar; goto "x>1235 and y0>=38" LEFT 4; kn 4 LEFT; obs shields_reached "$LASTFX"
+fresh; nav $W/a.html; base; pf; toolbar; goto "x>1235 and y0>=38" LEFT 4; kn 3 LEFT; obs shields_reached "$LASTFX"
 k ENTER; sleep 5; obs shields_panel "$(cdp pages | cut -c1-300)"
 for i in 1 2 3 4 5 6; do k DOWN; snap "$OUT/shots/shields-d$i.png"; obs shields_down$i "$(CDP_MATCH=shields timeout 25 python3 /w/cdp.py eval "(function(){let e=document.activeElement;while(e&&e.shadowRoot&&e.shadowRoot.activeElement)e=e.shadowRoot.activeElement;return e?(e.tagName+'#'+e.id+' '+(e.getAttribute('aria-label')||e.textContent||'').trim().slice(0,40)):'none'})()" 2>&1 | tail -1)"; done
 k BACK; sleep 2; obs shields_after_back "$(cdp pages | cut -c1-200)"
