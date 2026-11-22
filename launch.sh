@@ -42,8 +42,7 @@ res appdir "${APPDIR:-not installed}"
 [ -n "$APPDIR" ] || { res launch_result "install failed"; kill $SSLOOP 2>/dev/null; return 0; }
 gsh "cat $APPDIR/appinfo.json; echo; cat $APPDIR/bin/requires; ls -l $APPDIR $APPDIR/bin; du -sh $APPDIR" > "$B/appdir.txt"
 res version "$(gsh "grep -o '\"version\": *\"[^\"]*\"' $APPDIR/appinfo.json" | tail -1)"
-# the launcher alone, outside the app jail: does it run on this firmware at all?
-gsh "$APPDIR/bin/run --version 2>&1 | head -3; echo rc=\$?" > "$B/run-direct.txt"; res run_direct "$(tr '\n' ' ' < "$B/run-direct.txt" | cut -c1-200)"
+# (no root test run of bin/run here: as root it makes /tmp/<id> root's, and the app's own user then can't start)
 
 for n in 1 2 3; do
 	step launch-try$n
