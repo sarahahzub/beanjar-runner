@@ -75,3 +75,19 @@ for n in 1 2 3; do
 done
 kill $SSLOOP 2>/dev/null
 res launch_result "try1=$(grep -m1 try1_chrome_first "$R" | cut -d= -f2) try2=$(grep -m1 try2_chrome_first "$R" | cut -d= -f2) try3=$(grep -m1 try3_chrome_first "$R" | cut -d= -f2)"
+
+# Video check (launcher 1.1.1+): does LG's player library have the C++11 Feed the launcher hooks, and which player
+# does the launcher load for an H.264 clip (BUFFERSTREAM or NDL's own)? Beanjar has no real decoder, so this checks
+# the setup messages, not the picture.
+step launch-video
+gsh "for f in /usr/lib/libplayerAPIs.so.1 /usr/lib/libNDL_directmedia_impl.so.1 /usr/lib/libNDL_directmedia.so.1; do [ -e \$f ] || { echo \"\$f missing\"; continue; }; echo \"\$f: feed_cxx11=\$(grep -a -c '_ZN17StarfishMediaAPIs4FeedB5cxx11EPKc' \$f) feed_old=\$(grep -a -c '_ZN17StarfishMediaAPIs4FeedEPKc' \$f) load=\$(grep -a -c '_ZN17StarfishMediaAPIs4LoadEPKcPFvixS1_E' \$f) ndlload=\$(grep -a -c 'NDL_DirectMediaLoad' \$f)\"; done" > "$B/symbols.txt"
+res symbols "$(tr '\n' ' ' < "$B/symbols.txt" | cut -c1-500)"
+gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'" >/dev/null; sleep 8
+gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\",\"params\":{\"target\":\"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4\"}}'" > "$B/launch-video.txt"
+sleep 60
+gsh "grep -E 'ndl api|smp|open codec|video frame|play =|nohw|unload|init =|load failed|dlopen|missing' $T/media.log | cut -c1-400 | head -n 30" > "$B/video-media.txt"
+gsh "grep -a -E 'cn-ndl: (hardware|audio)|software' $T/browser.log | tail -n 4" > "$B/video-browser.txt"
+shot launch-video >/dev/null
+res video_player "$(grep -o -E 'smp load( \(BUFFERSTREAM\)| \(NDL.s game player\))?|libplayerAPIs has no C\+\+11 Feed[^|]*|ndl api: [a-z]*' "$B/video-media.txt" | sort | uniq -c | tr '\n' ' ')"
+res video_load "$(grep -E 'smp load =|open codec|init =' "$B/video-media.txt" | tr '\n' ' ' | cut -c1-300)"
+res video_feeds "$(grep -E 'smp feed' "$B/video-media.txt" | head -n 3 | tr '\n' ' ' | cut -c1-400)"
