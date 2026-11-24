@@ -3,6 +3,6 @@
 # Run in the guest (launch.sh, launch-mem step).
 echo "$1 $(grep -E 'MemAvailable|SwapFree' /proc/meminfo | tr -s ' ' | tr '\n' ' ')"
 for p in /proc/[0-9]*; do
-	r=$(sed -n 's/^VmRSS: *\([0-9]*\) kB/\1/p' "$p/status" 2>/dev/null)
+	r=$(awk '/^VmRSS/{print $2}' "$p/status" 2>/dev/null)
 	[ -n "$r" ] && [ "$r" -gt 20000 ] && echo "  $r $(tr '\0' ' ' < "$p/cmdline" 2>/dev/null | cut -c1-90)"
 done | sort -rn | head -n 14

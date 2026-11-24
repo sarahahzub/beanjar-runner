@@ -97,15 +97,22 @@ res video_feeds "$(grep -E 'smp feed|direct player: (feed|first frame|load compl
 # free memory and the processes over 20 MB (memsnap.sh), so a growing or leftover media pipeline shows up.
 step launch-mem
 gsh_in "cat > /tmp/memsnap.sh && chmod 755 /tmp/memsnap.sh" < /w/memsnap.sh
-memrun() { # $1 tag
+memrun() { # $1 tag: restart the browser with the debug port, then six videos in the same tab (each a new stream)
 	gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'" >/dev/null; sleep 10
+	gsh "echo --remote-debugging-port=9222 > $T/browser.flags && chmod 644 $T/browser.flags"
 	gsh "sh /tmp/memsnap.sh $1-before" >> "$B/mem-$1.txt"
+	gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\"}'" >/dev/null; sleep 40
+	pkill -f 'ssh .*-L 9222' 2>/dev/null; sleep 1
+	(${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L 9222:127.0.0.1:9222 } > "$B/mem-$1-fwd.log" 2>&1 &)
+	sleep 5
 	for n in 1 2 3 4 5 6; do
-		gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\",\"params\":{\"target\":\"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4?n=$n\"}}'" >/dev/null
-		sleep 30
+		timeout 60 python3 /w/cdp.py nav "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4?n=$n" 20 > /dev/null 2>&1
+		timeout 30 python3 /w/cdp.py eval "(()=>{const v=document.querySelector('video'); if(!v) return 'no video'; v.loop=true; v.play(); return 'playing'})()" >> "$B/mem-$1-cdp.txt" 2>&1
+		sleep 25
 		gsh "sh /tmp/memsnap.sh $1-$n" >> "$B/mem-$1.txt"
 	done
-	gsh "grep -E 'direct player: (on|off|load =|unload)|smp load =|old NDL API: open|video close|chrome exited' $T/media.log | cut -c1-160 | tail -n 30" > "$B/mem-$1-media.txt"
+	pkill -f 'ssh .*-L 9222' 2>/dev/null
+	gsh "grep -E 'direct player: (on|off|load =|unload|close)|smp load =|old NDL API: open|video close|chrome exited' $T/media.log | cut -c1-160 | tail -n 40" > "$B/mem-$1-media.txt"
 	res mem_$1 "$(grep -E "^$1-" "$B/mem-$1.txt" | sed -n '1p;$p' | tr '\n' ' ' | cut -c1-300)"
 }
 memrun direct
@@ -113,4 +120,4 @@ gsh "echo sfbuf=small > $T/media.opts; chmod 644 $T/media.opts"
 memrun small
 gsh "echo smp=ndl > $T/media.opts; chmod 644 $T/media.opts"
 memrun ndl
-gsh "rm -f $T/media.opts"
+gsh "rm -f $T/media.opts $T/browser.flags"
