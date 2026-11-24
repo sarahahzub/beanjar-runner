@@ -91,3 +91,24 @@ shot launch-video >/dev/null
 res video_player "$(grep -o -E 'direct player: (on|off)[^,]*|direct player: load = [01]|smp load( \(BUFFERSTREAM\)| \(NDL.s game player\))?|libplayerAPIs has no C\+\+11 Feed[^|]*|ndl api: [a-z]*' "$B/video-media.txt" | sort | uniq -c | tr '\n' ' ')"
 res video_load "$(grep -E 'smp load =|open codec|init =' "$B/video-media.txt" | tr '\n' ' ' | cut -c1-300)"
 res video_feeds "$(grep -E 'smp feed|direct player: (feed|first frame|load completed|display window|event)|acb event' "$B/video-media.txt" | head -n 12 | tr "\n" " " | cut -c1-1500)"
+
+# Memory, direct player against NDL (#12: a B9, webOS 4.5, closed "out of memory" with 1.1.1's direct player, not with
+# 1.1.0). Six video streams in a row in the running browser, then the same with media.opts smp=ndl. After each:
+# free memory and the processes over 20 MB (memsnap.sh), so a growing or leftover media pipeline shows up.
+step launch-mem
+gsh_in "cat > /tmp/memsnap.sh && chmod 755 /tmp/memsnap.sh" < /w/memsnap.sh
+memrun() { # $1 tag
+	gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'" >/dev/null; sleep 10
+	gsh "sh /tmp/memsnap.sh $1-before" >> "$B/mem-$1.txt"
+	for n in 1 2 3 4 5 6; do
+		gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\",\"params\":{\"target\":\"https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4?n=$n\"}}'" >/dev/null
+		sleep 30
+		gsh "sh /tmp/memsnap.sh $1-$n" >> "$B/mem-$1.txt"
+	done
+	gsh "grep -E 'direct player: (on|off|load =|unload)|smp load =|old NDL API: open|video close|chrome exited' $T/media.log | cut -c1-160 | tail -n 30" > "$B/mem-$1-media.txt"
+	res mem_$1 "$(grep -E "^$1-" "$B/mem-$1.txt" | sed -n '1p;$p' | tr '\n' ' ' | cut -c1-300)"
+}
+memrun direct
+gsh "echo smp=ndl > $T/media.opts; chmod 644 $T/media.opts"
+memrun ndl
+gsh "rm -f $T/media.opts"
