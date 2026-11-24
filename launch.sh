@@ -109,6 +109,8 @@ memrun() { # $1 tag
 	res mem_$1 "$(grep -E "^$1-" "$B/mem-$1.txt" | sed -n '1p;$p' | tr '\n' ' ' | cut -c1-300)"
 }
 memrun direct
+gsh "echo sfbuf=small > $T/media.opts; chmod 644 $T/media.opts"
+memrun small
 gsh "echo smp=ndl > $T/media.opts; chmod 644 $T/media.opts"
 memrun ndl
 gsh "rm -f $T/media.opts"
