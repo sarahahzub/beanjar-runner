@@ -1,0 +1,19 @@
+name: armprobe
+# Can a GitHub arm64 runner run Beanjar natively: /dev/kvm, 32-bit code at EL0, a GPU render node?
+on:
+  push:
+    branches: [armprobe]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - run: |
+          uname -a; nproc; free -m
+          grep -m1 'CPU part' /proc/cpuinfo || true
+          ls -l /dev/kvm /dev/dri 2>&1 || true
+          setarch linux32 true && echo "AArch32 at EL0: yes" || echo "AArch32 at EL0: no"
+          sudo modprobe kvm 2>&1 || true; ls -l /dev/kvm 2>&1 || true
+          dmesg 2>/dev/null | grep -i -m5 kvm || sudo dmesg | grep -i -m5 kvm || true
+          sudo modprobe vgem 2>&1 && ls -l /dev/dri 2>&1 || echo "no vgem"
+          ls /lib/modules/$(uname -r)/kernel/drivers/gpu/drm 2>/dev/null | head || true
