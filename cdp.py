@@ -161,9 +161,10 @@ def main():
         print(json.dumps(evaluate(c, sys.argv[2])))
 
 
-try:
-    main()
-except SystemExit:
-    raise
-except Exception as e:
-    print(json.dumps({"error": f"{type(e).__name__}: {e}"}))
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(json.dumps({"error": f"{type(e).__name__}: {e}"}))

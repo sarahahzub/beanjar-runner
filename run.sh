@@ -4,7 +4,7 @@
 #   KERNEL   x86-64 | arm64 | auto   (arm64 on an x86_64 host = full TCG; auto = Beanjar's own pick)
 #   BOOT_MIN minutes to wait for the TV UI (default 25)
 #   OUT      output directory (screenshots, logs, results.txt)
-#   MODE     smoke | bench | cpu | brave (brave.sh: install and test /w/brave.ipk) | dpad (dpad.sh: remote D-pad test) | extkb (extkb.sh: keyboard in an extension popup) | launch (launch.sh: does the IPK start)
+#   MODE     smoke | bench | cpu | brave (brave.sh: install and test /w/brave.ipk) | dpad (dpad.sh: remote D-pad test) | extkb (extkb.sh: keyboard in an extension popup) | launch (launch.sh: does the IPK start) | fullscreen (fs.sh: issue #39, does fullscreen stay)
 set -u
 export DEBIAN_FRONTEND=noninteractive VM_SYSTEMD=0
 OUT=${OUT:-/w/out}; BOOT_MIN=${BOOT_MIN:-25}; KERNEL=${KERNEL:-x86-64}; V=0.6.0
@@ -128,6 +128,8 @@ elif [ -n "$booted" ] && [ "${MODE:-smoke}" = extkb ]; then
 	. /w/extkb.sh
 elif [ -n "$booted" ] && [ "${MODE:-smoke}" = launch ]; then
 	. /w/launch.sh
+elif [ -n "$booted" ] && [ "${MODE:-smoke}" = fullscreen ]; then
+	. /w/fs.sh
 elif [ -n "$booted" ]; then
 	step smoke
 	(timeout 2400 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15; res vnc_running "$(pgrep -c beanjar-vnc)"
