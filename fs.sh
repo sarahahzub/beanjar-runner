@@ -72,6 +72,7 @@ round() { # $1 tag, $2 fs.py HOW, $3 media.opts content
 	gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -a -E 'set_state|requestStateChange|sendState|setState' | cut -c1-260" > "$B/$1-lsm-state.txt"
 	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a -v -E 'create_wl_buffer|dbus' | tail -n 80" > "$B/$1-browser-tail.txt"
 	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a -E 'wl_webos_shell_surface|wl_shell_surface|wl_webos_shell@|xdg_toplevel' | grep -a -v -E 'set_property|ping|pong' | cut -c1-200 | head -n 200" > "$B/$1-wayland.txt"
+	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a 'cn-fs:' | cut -c1-200 | head -n 80" > "$B/$1-cnfs.txt"
 	gsh "grep -a -E 'screensaver' $T/media.log | tail -n 20" > "$B/$1-screensaver.txt"
 	gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -a -i -E '$ID|LSM|surface|fullscreen|screensaver|keyfilter|foreground|wam' | cut -c1-300 | tail -n 120" > "$B/$1-messages.txt"
 	res fs_$1 "$(python3 -c 'import json,sys
@@ -81,6 +82,7 @@ ch=" | ".join("%s %s %s i=%s fs=%s v=%s" % (x["t"],x.get("win"),x.get("size"),x.
 print("call=%s on=%s left=%s :: %s :: events %s" % (str(d.get("call"))[:60], d.get("fullscreen_at_s"), d.get("left_fullscreen_at_s"), ch, "; ".join(d.get("page_events",[])[:8])))' "$B/$1-fs.json" | cut -c1-900)"
 	res fs_$1_lsm_states "$(grep -a -o -E 'State changed\([A-Z]+\)|state=[0-9]+' "$B/$1-browser-state.txt" | tr '\n' ' ' | cut -c1-300)"
 	res fs_$1_wayland "$(grep -a -E 'set_state|state_changed|state_about_to_change|exposed|close' "$B/$1-wayland.txt" | sed -E 's/^\[ *([0-9.]+)\] */\1 /' | head -n 12 | tr '\n' '|' | cut -c1-900)"
+	res fs_$1_cnfs "$(head -n 24 "$B/$1-cnfs.txt" | sed -E 's/^\[[^ ]*\/([0-9.]+):WARNING:[^ ]*\] cn-fs: /\1 /' | tr '\n' '|' | cut -c1-1800)"
 	res fs_$1_fg "$(cut -d' ' -f2 "$B/$1-fg.txt" | uniq -c | tr '\n' ' ' | tr -s ' ')"
 }
 round window window ''
