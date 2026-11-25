@@ -30,6 +30,9 @@ res appdir "${APPDIR:-not installed}"
 res version "$(gsh "grep -o '\"version\": *\"[^\"]*\"' $APPDIR/appinfo.json" | tail -1)"
 # the shell surface protocol the TV offers (patch 0002 drops client_size_changed from Chromium's listener)
 gsh "ls /usr/share/wayland* /usr/share/webos-wayland* 2>/dev/null; grep -l -r 'wl_webos_shell_surface' /usr/share 2>/dev/null | head -3" > "$B/protocol-files.txt"
+# Wayland protocol log (run 2): every webOS shell request and event in browser.log, to see whether LSM sends a
+# state_changed before Chrome asks to leave fullscreen (round 1 showed Chrome's own "FullScreen -> NoState" request).
+gsh "grep -q WAYLAND_DEBUG $APPDIR/bin/run.sh || sed -i '2i export WAYLAND_DEBUG=client' $APPDIR/bin/run.sh; sed -n 1,3p $APPDIR/bin/run.sh" > "$B/run-sh-head.txt"
 # warm-up start: the app creates $T itself, owned by its own user (made by root, the app could not write there)
 step fs-warmup
 gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\"}'" > "$B/warmup-launch.txt"
@@ -66,7 +69,9 @@ round() { # $1 tag, $2 fs.py HOW, $3 media.opts content
 	t2=$(date +%s); while [ ! -s "$B/$1-fs.json" ] && [ $(( $(date +%s) - t2 )) -lt 60 ]; do sleep 3; done
 	pkill -f 'ssh .*-L 9222' 2>/dev/null
 	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a -v -E 'create_wl_buffer|dbus' | grep -a -i -E 'state|fullscreen|exclusive|activation|exposed|maximiz|minimiz|bounds|webos_shell|wayland_window' | cut -c1-300 | head -n 150" > "$B/$1-browser-state.txt"
+	gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -a -E 'set_state|requestStateChange|sendState|setState' | cut -c1-260" > "$B/$1-lsm-state.txt"
 	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a -v -E 'create_wl_buffer|dbus' | tail -n 80" > "$B/$1-browser-tail.txt"
+	gsh "tail -n +$((${BL:-0} + 1)) $T/browser.log | grep -a -E 'wl_webos_shell_surface|wl_shell_surface|wl_webos_shell@|xdg_toplevel' | grep -a -v -E 'set_property|ping|pong' | cut -c1-200 | head -n 200" > "$B/$1-wayland.txt"
 	gsh "grep -a -E 'screensaver' $T/media.log | tail -n 20" > "$B/$1-screensaver.txt"
 	gsh "tail -n +$((ML + 1)) /var/log/messages 2>/dev/null | grep -a -i -E '$ID|LSM|surface|fullscreen|screensaver|keyfilter|foreground|wam' | cut -c1-300 | tail -n 120" > "$B/$1-messages.txt"
 	res fs_$1 "$(python3 -c 'import json,sys
@@ -75,6 +80,7 @@ except Exception as e: print("no result", open(sys.argv[1]).read()[:200].replace
 ch=" | ".join("%s %s %s i=%s fs=%s v=%s" % (x["t"],x.get("win"),x.get("size"),x.get("i"),x.get("fs"),x.get("v")) for x in d.get("changes",[])[:8])
 print("call=%s on=%s left=%s :: %s :: events %s" % (str(d.get("call"))[:60], d.get("fullscreen_at_s"), d.get("left_fullscreen_at_s"), ch, "; ".join(d.get("page_events",[])[:8])))' "$B/$1-fs.json" | cut -c1-900)"
 	res fs_$1_lsm_states "$(grep -a -o -E 'State changed\([A-Z]+\)|state=[0-9]+' "$B/$1-browser-state.txt" | tr '\n' ' ' | cut -c1-300)"
+	res fs_$1_wayland "$(grep -a -E 'set_state|state_changed|state_about_to_change|exposed|close' "$B/$1-wayland.txt" | sed -E 's/^\[ *([0-9.]+)\] */\1 /' | head -n 12 | tr '\n' '|' | cut -c1-900)"
 	res fs_$1_fg "$(cut -d' ' -f2 "$B/$1-fg.txt" | uniq -c | tr '\n' ' ' | tr -s ' ')"
 }
 round window window ''
