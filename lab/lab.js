@@ -114,13 +114,17 @@ const TESTS = {
   async iframe() {
     // Same-origin iframe player; it reports its own timing through postMessage.
     clear(); const f = document.createElement('iframe'); f.src = 'frame.html?src=avsync.mp4&muted=0'; f.allow = 'autoplay; fullscreen';
-    stage.appendChild(f);
-    await sleep(3000);
+    await new Promise((r) => { f.onload = r; stage.appendChild(f); setTimeout(r, 30000); });
     const ask = () => new Promise((r) => {
       const h = (e) => { if (e.data && e.data.frame === 'stat') { removeEventListener('message', h); r(e.data); } };
-      addEventListener('message', h); f.contentWindow.postMessage('stat', '*'); setTimeout(() => r(null), 3000);
+      addEventListener('message', h); f.contentWindow.postMessage('stat', '*');
+      setTimeout(() => { removeEventListener('message', h); r(null); }, 5000);
     });
-    const a = await ask(); const t0 = Date.now(); await sleep(15000); const b = await ask();
+    // wait (up to 40 s) until the frame's video plays, then measure 15 s of it
+    let a = null; const tw = Date.now();
+    while (Date.now() - tw < 40000) { a = await ask(); if (a && a.t > 0.05) break; await sleep(1000); }
+    if (!a || !(a.t > 0.05)) return { verdict: 'bad', details: { never_played: a } };
+    const t0 = Date.now(); await sleep(15000); const b = await ask();
     if (!a || !b) return { verdict: 'bad', details: { a, b } };
     const wall = (Date.now() - t0) / 1000;
     const d = { rate: +((b.t - a.t) / wall).toFixed(3), fps: +((b.frames - a.frames) / wall).toFixed(1), waiting: b.waiting, err: b.err,

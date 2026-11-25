@@ -18,7 +18,7 @@ step() { echo "== $* (t=$(el)s)"; }
 step packages
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends wget ca-certificates git build-essential cmake liblzo2-dev \
-	libssl-dev zlib1g-dev unzip python3 python3-pil python3-websocket binutils procps nodejs npm openssh-client >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
+	libssl-dev zlib1g-dev unzip python3 python3-pil python3-websocket binutils procps nodejs npm openssh-client curl >"$OUT/logs/apt.log" 2>&1 || { tail -20 "$OUT/logs/apt.log"; exit 1; }
 arch=$(dpkg --print-architecture)
 url=https://github.com/webosbrew/beanjar/releases/download/v$V
 mkdir -p /tmp/debs && cd /tmp/debs

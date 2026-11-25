@@ -94,7 +94,8 @@ fi
 # 3. media tests (stock fonts again)
 step lab-media
 start_lab media
-for tst in codecs:30 avsync:70 p60:50 vp9:50 mse:70 iframe:40 youtube:40 two:50 audio_aac:30 audio_opus:30 fullscreen:30; do
+# timeouts for the slow emulator: a test plays its clip for 6-30 s after a start that took up to 25 s there
+for tst in codecs:40 avsync:120 p60:110 vp9:110 mse:120 iframe:120 youtube:60 two:110 audio_aac:80 audio_opus:80 fullscreen:45; do
 	n=${tst%%:*}; to=${tst##*:}
 	( sleep 8; shot lab-$n >/dev/null ) &
 	timeout $((to + 20)) python3 /w/lab.py run $n $to > "$B/media-$n.json" 2>&1
