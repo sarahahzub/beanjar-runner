@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebOS Chromium test lab</title>
+<style>
+body{font:20px sans-serif;margin:16px 24px;background:#111;color:#eee}
+h1{font-size:28px;margin:0 0 8px}h2{font-size:22px;margin:18px 0 6px}
+button{font:inherit;padding:8px 16px;margin:4px;border-radius:8px;border:2px solid #555;background:#222;color:#eee}
+button:focus{outline:4px solid #4af;border-color:#4af}
+#stage{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0}
+#stage video,#stage iframe{width:480px;height:270px;background:#000;border:0}
+table{border-collapse:collapse;font-size:17px}td,th{border:1px solid #444;padding:3px 8px;vertical-align:top;text-align:left}
+.ok{color:#6d6}.bad{color:#f66}.warn{color:#fc5}
+#fonts td{font-size:26px}
+.serif{font-family:serif}.sans{font-family:sans-serif}.mono{font-family:monospace}
+pre{white-space:pre-wrap;font-size:14px;max-height:220px;overflow:auto;background:#000;padding:6px}
+</style>
+</head>
+<body>
+<h1>WebOS Chromium test lab</h1>
+<div id="buttons"></div>
+<div id="stage"></div>
+<h2>Results</h2>
+<table id="res"><tr><th>test</th><th>verdict</th><th>details</th></tr></table>
+<p id="sent"></p>
+<h2>Fonts</h2>
+<table id="fonts"></table>
+<pre id="log"></pre>
+<script src="lab.js"></script>
+</body>
+</html>

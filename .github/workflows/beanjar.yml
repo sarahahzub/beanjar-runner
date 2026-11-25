@@ -13,7 +13,7 @@ on:
         description: minutes to wait for the TV UI
         default: "25"
       mode:
-        description: smoke | bench | cpu | brave | dpad | extkb | launch | fullscreen
+        description: smoke | bench | cpu | brave | dpad | extkb | launch | fullscreen | lab
         default: smoke
       ipk_url:
         description: brave mode, the IPK to test
@@ -33,7 +33,7 @@ jobs:
         include: ${{ fromJSON(inputs.jobs) }}
     name: ${{ matrix.name }} (${{ matrix.kernel }}, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ inputs.mode == 'dpad' && 240 || inputs.mode == 'extkb' && 100 || inputs.mode == 'launch' && 70 || inputs.mode == 'fullscreen' && 80 || inputs.mode == 'brave' && 110 || 75 }}
+    timeout-minutes: ${{ inputs.mode == 'dpad' && 240 || inputs.mode == 'extkb' && 100 || inputs.mode == 'launch' && 70 || inputs.mode == 'fullscreen' && 80 || inputs.mode == 'lab' && 110 || inputs.mode == 'brave' && 110 || 75 }}
     steps:
       - uses: actions/checkout@v4
       - name: Host facts
@@ -41,7 +41,7 @@ jobs:
           nproc; free -m | head -2; ls -l /dev/kvm /dev/dri 2>&1 | head -5
           df -h / | tail -1
       - name: Download and check the IPK (brave and dpad modes)
-        if: inputs.mode == 'brave' || inputs.mode == 'dpad' || inputs.mode == 'extkb' || inputs.mode == 'launch' || inputs.mode == 'fullscreen'
+        if: inputs.mode == 'brave' || inputs.mode == 'dpad' || inputs.mode == 'extkb' || inputs.mode == 'launch' || inputs.mode == 'fullscreen' || inputs.mode == 'lab'
         env:
           IPK_URL: ${{ matrix.ipk_url || inputs.ipk_url }}
           IPK_SHA: ${{ matrix.ipk_sha256 || inputs.ipk_sha256 }}
