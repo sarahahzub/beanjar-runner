@@ -25,9 +25,9 @@ npm install -g --silent @webos-tools/cli >"$OUT/logs/npm.log" 2>&1
 timeout 900 beanjar ares-install -d tv1 /w/brave.ipk > "$B/ares-install.txt" 2>&1; res install "rc=$? $(tail -1 "$B/ares-install.txt" | cut -c1-80)"
 APPDIR=/media/developer/apps/usr/palm/applications/$ID
 res version "$(gsh "grep -o '\"version\": *\"[^\"]*\"' $APPDIR/appinfo.json" | tail -1)"
-R=$APPDIR/bin/run.sh
+RSH=$APPDIR/bin/run.sh   # not R: run.sh keeps results.txt in $R
 gsh_in "cat > /tmp/levers.sed" < /w/levers.sed
-gsh "sed -i -f /tmp/levers.sed $R; grep -n -E 'lever.sh|CN_EN|CN_DIS|CN_JS|CN_EXTRA' $R | cut -c1-120; sh -n $R && echo syntax-ok" > "$B/runsh-hooks.txt"
+gsh "sed -i -f /tmp/levers.sed $RSH; grep -n -E 'lever.sh|CN_EN|CN_DIS|CN_JS|CN_EXTRA' $RSH | cut -c1-120; sh -n $RSH && echo syntax-ok" > "$B/runsh-hooks.txt"
 res hooks "$(grep -c CN_ "$B/runsh-hooks.txt") $(tail -1 "$B/runsh-hooks.txt")"
 gsh "luna-send -n 1 $LS/launch '{\"id\":\"$ID\"}'" >/dev/null; sleep 50   # warm-up: the app makes $T as its own user
 
@@ -45,18 +45,20 @@ config() { # $1 name, $2 lever.sh content
 	local loads=$(timeout 240 python3 /w/levers.py 2>&1 | tail -1 | cut -c1-200)
 	sleep 60
 	local m=$(memsum)
-	gsh "c=\$(pgrep -o -f '${ID}/browser/chrome'); tr '\\0' ' ' < /proc/\$c/cmdline | grep -o -E 'skia-[a-z-]*=[0-9]+|max-semi-space-size=[0-9]+|Prerender2|PartitionAllocMemoryReclaimer' | sort -u | tr '\\n' ' '; tr '\\0' '\\n' < /proc/\$c/environ | grep MALLOC" > "$B/$1-applied.txt"
-	res lev_$1 "start_s=$up idle[$idle] 3tabs+60s[$m] loads=$loads applied=[$(tr '\n' ' ' < "$B/$1-applied.txt" | cut -c1-200)]"
+	local tabs=$(curl -s -m 10 http://127.0.0.1:9222/json/list | grep -c '"type": "page"')
+	gsh "c=\$(for p in /proc/[0-9]*; do tr '\\0' ' ' < \$p/cmdline 2>/dev/null | grep -q -- '${ID}/browser/chrome.*--user-data-dir' && ! tr '\\0' ' ' < \$p/cmdline | grep -q -- '--type=' && echo \${p#/proc/}; done | head -1); tr '\\0' ' ' < /proc/\$c/cmdline | grep -o -E 'skia-[a-z-]*=[0-9]+|max-semi-space-size=[0-9]+|Prerender2|PartitionAllocMemoryReclaimer' | sort -u | tr '\\n' ' '; tr '\\0' '\\n' < /proc/\$c/environ | grep MALLOC" > "$B/$1-applied.txt"
+	res lev_$1 "start_s=$up idle[$idle] 3tabs+60s[$m] pages=$tabs loads=$loads applied=[$(tr '\n' ' ' < "$B/$1-applied.txt" | cut -c1-200)]"
 	pkill -f 'ssh .*-L 9222' 2>/dev/null
 }
-config base1 ''
-config prefetch 'CN_DIS=",Prerender2,SearchPrefetchServicePrefetching,PreconnectToSearch,LoadingPredictorPrefetch,NoStatePrefetch"'
-config arena 'export MALLOC_ARENA_MAX=2'
-config v8young 'CN_JS=" --max-semi-space-size=1 --memory-reducer-for-small-heaps"'
-config skia 'CN_EXTRA="--skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=2"'
-config pa 'CN_EN=",PartitionAllocMemoryReclaimer,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,MemoryPurgeInBackground"'
-config all 'export MALLOC_ARENA_MAX=2; CN_DIS=",Prerender2,SearchPrefetchServicePrefetching,PreconnectToSearch,LoadingPredictorPrefetch,NoStatePrefetch"; CN_JS=" --max-semi-space-size=1 --memory-reducer-for-small-heaps"; CN_EXTRA="--skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=2"; CN_EN=",PartitionAllocMemoryReclaimer,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,MemoryPurgeInBackground"'
-config base2 ''
+for rep in 1 2; do
+	config base$rep ''
+	config prefetch$rep 'CN_DIS=",Prerender2,SearchPrefetchServicePrefetching,PreconnectToSearch,LoadingPredictorPrefetch,NoStatePrefetch"'
+	config arena$rep 'export MALLOC_ARENA_MAX=2'
+	config v8young$rep 'CN_JS=" --max-semi-space-size=1 --memory-reducer-for-small-heaps"'
+	config skia$rep 'CN_EXTRA="--skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=2"'
+	config pa$rep 'CN_EN=",PartitionAllocMemoryReclaimer,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,MemoryPurgeInBackground"'
+	config all$rep 'export MALLOC_ARENA_MAX=2; CN_DIS=",Prerender2,SearchPrefetchServicePrefetching,PreconnectToSearch,LoadingPredictorPrefetch,NoStatePrefetch"; CN_JS=" --max-semi-space-size=1 --memory-reducer-for-small-heaps"; CN_EXTRA="--skia-resource-cache-limit-mb=16 --skia-font-cache-limit-mb=2"; CN_EN=",PartitionAllocMemoryReclaimer,PartitionAllocLargeEmptySlotSpanRing,PartitionAllocSortActiveSlotSpans,PartitionAllocStraightenLargerSlotSpanFreeLists,MemoryPurgeInBackground"'
+done
 stop_app
 kill $SSLOOP 2>/dev/null
 gsh "rm -f $T/lever.sh $T/media.opts $T/browser.flags"
