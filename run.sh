@@ -132,6 +132,8 @@ elif [ -n "$booted" ] && [ "${MODE:-smoke}" = fullscreen ]; then
 	. /w/fs.sh
 elif [ -n "$booted" ] && [ "${MODE:-smoke}" = lab ]; then
 	. /w/lab.sh
+elif [ -n "$booted" ] && [ "${MODE:-smoke}" = levers ]; then
+	. /w/levers.sh
 elif [ -n "$booted" ]; then
 	step smoke
 	(timeout 2400 beanjar vnc start tv1 >"$OUT/logs/vnc.log" 2>&1 &); sleep 15; res vnc_running "$(pgrep -c beanjar-vnc)"
