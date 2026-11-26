@@ -42,7 +42,7 @@ res warmup "procs=[$(procs)] tdir=$(gsh "stat -c '%U:%G %a' $T" | tail -1)"
 FLAGS='--remote-debugging-port=9222
 --enable-logging=stderr
 --vmodule=webos_shell_surface_wrapper=1,wayland_window_webos=1,wayland_window=1,wayland_toplevel_window=1,exclusive_access_manager=1,fullscreen_controller=1,browser_view=1'
-round() { # $1 tag, $2 fs.py HOW, $3 media.opts content
+round() { # $1 tag, $2 fs.py HOW, $3 media.opts content, $4 page (default Google)
 	step fs-$1
 	gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'" >/dev/null
 	t2=$(date +%s); while [ -n "$(procs)" ] && [ $(( $(date +%s) - t2 )) -lt 30 ]; do sleep 3; done
@@ -56,7 +56,7 @@ round() { # $1 tag, $2 fs.py HOW, $3 media.opts content
 	pkill -f 'ssh .*-L 9222' 2>/dev/null; sleep 1
 	(${SSH_ROOT/ssh /ssh -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -N -L 9222:127.0.0.1:9222 } > "$B/$1-fwd.log" 2>&1 &)
 	sleep 5
-	timeout 90 python3 /w/cdp.py nav "https://www.google.com/" 20 > "$B/$1-nav.json" 2>&1
+	timeout 90 python3 /w/cdp.py nav "${4:-https://www.google.com/}" 25 > "$B/$1-nav.json" 2>&1
 	shot fs-$1-before >/dev/null
 	gsh "wc -l < $T/browser.log" > /tmp/bl0; BL=$(tail -1 /tmp/bl0 | tr -dc 0-9)
 	(timeout 150 python3 /w/fs.py "$2" 90 > "$B/$1-fs.json" 2>&1 &)
@@ -89,6 +89,7 @@ round window window ''
 round key key ''
 round element element ''
 round window-noss window 'noss'
+round youtube player '' 'https://www.youtube.com/watch?v=aqz-KE-bpKQ'
 gsh "luna-send -n 1 $LS/closeByAppId '{\"id\":\"$ID\"}'" >/dev/null
 gsh "rm -f $T/media.opts $T/browser.flags"
-res fs_result "window_left=$(grep -m1 '^fs_window=' "$R" | grep -o 'left=[^ ]*') key_left=$(grep -m1 '^fs_key=' "$R" | grep -o 'left=[^ ]*') element_left=$(grep -m1 '^fs_element=' "$R" | grep -o 'left=[^ ]*') noss_left=$(grep -m1 '^fs_window-noss=' "$R" | grep -o 'left=[^ ]*')"
+res fs_result "window_left=$(grep -m1 '^fs_window=' "$R" | grep -o 'left=[^ ]*') key_left=$(grep -m1 '^fs_key=' "$R" | grep -o 'left=[^ ]*') element_left=$(grep -m1 '^fs_element=' "$R" | grep -o 'left=[^ ]*') noss_left=$(grep -m1 '^fs_window-noss=' "$R" | grep -o 'left=[^ ]*') youtube_left=$(grep -m1 '^fs_youtube=' "$R" | grep -o 'left=[^ ]*')"

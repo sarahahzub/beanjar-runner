@@ -46,6 +46,11 @@ elif how == "key":
     k = {"key": "F11", "code": "F11", "windowsVirtualKeyCode": 122, "nativeVirtualKeyCode": 122}
     r = pc.call("Input.dispatchKeyEvent", {"type": "rawKeyDown", **k})
     pc.call("Input.dispatchKeyEvent", {"type": "keyUp", **k})
+elif how == "player":  # YouTube: play, then fullscreen the player element (like its fullscreen button)
+    evaluate(pc, "(()=>{const v=document.querySelector('video'); if(v) v.play(); return 1})()")
+    time.sleep(3)
+    r = pc.call("Runtime.evaluate", {"expression": "(document.querySelector('#movie_player')||document.querySelector('video')||document.documentElement).requestFullscreen().then(()=>'ok',e=>'err '+e)",
+                                     "userGesture": True, "awaitPromise": True, "returnByValue": True})
 else:
     r = pc.call("Runtime.evaluate", {"expression": "document.documentElement.requestFullscreen().then(()=>'ok',e=>'err '+e)",
                                      "userGesture": True, "awaitPromise": True, "returnByValue": True})
